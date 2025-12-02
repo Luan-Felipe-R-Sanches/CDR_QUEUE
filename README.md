@@ -1,8 +1,4 @@
-Com certeza. Baseado em todo o código que desenvolvemos juntos, preparei um **README.md** completo e profissional para o seu projeto **Analytics Pro**.
 
-Ele cobre a instalação, configuração do Asterisk (AMI), estrutura de pastas e como usar cada módulo.
-
-Aqui está o arquivo `README.md`:
 
 ````markdown
 # Analytics Pro - Call Center Dashboard & Realtime Monitor
