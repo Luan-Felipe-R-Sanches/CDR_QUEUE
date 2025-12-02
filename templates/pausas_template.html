@@ -1,0 +1,49 @@
+<div class="page-header">
+    <div class="page-title">
+        <h3>Controle de Pausas / Status</h3>
+        <p>Monitoramento detalhado dos períodos de indisponibilidade dos agentes.</p>
+    </div>
+</div>
+
+<div class="search-area">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-3 filter-input-group">
+            <label for="inicio">Início</label>
+            <input type="datetime-local" id="inicio" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-3 filter-input-group">
+            <label for="fim">Fim</label>
+            <input type="datetime-local" id="fim" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-4">
+            <input type="text" id="busca" class="form-control form-control-sm" placeholder="Buscar Agente (Nome/Ramal)">
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-primary btn-sm w-100" onclick="carregarPausas()">Atualizar</button>
+        </div>
+    </div>
+</div>
+
+<div class="list-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th width="200">Agente</th>
+                    <th>Motivo da Pausa</th>
+                    <th width="150">Início</th>
+                    <th width="150">Fim</th>
+                    <th width="120">Duração</th>
+                </tr>
+            </thead>
+            <tbody id="lista-pausas">
+            </tbody>
+        </table>
+        <div class="d-flex justify-content-between align-items-center p-3 border-top">
+            <div class="text-muted small"><span id="total-registros-pausas">0</span> registros</div>
+            <nav>
+                <ul class="pagination pagination-sm m-0" id="pagination-container-pausas"></ul>
+            </nav>
+        </div>
+    </div>
+</div>

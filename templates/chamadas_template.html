@@ -1,0 +1,69 @@
+<div class="page-header">
+    <div class="page-title">
+        <h3>Listagem Detalhada</h3>
+        <p>Histórico completo com player de áudio integrado.</p>
+    </div>
+</div>
+
+<div class="search-area">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-2 filter-input-group"><label>Início</label><input type="datetime-local" id="inicio"
+                class="form-control form-control-sm"></div>
+        <div class="col-md-2 filter-input-group"><label>Fim</label><input type="datetime-local" id="fim"
+                class="form-control form-control-sm"></div>
+        <div class="col-md-2 filter-input-group"><label>Status</label><select id="status"
+                class="form-select form-select-sm">
+                <option value="">Todos</option>
+                <option value="ATENDIDA">ATENDIDA</option>
+                <option value="ABANDONO">ABANDONO</option>
+            </select></div>
+        <div class="col-md-3"><input type="text" id="busca" class="form-control form-control-sm"
+                placeholder="Buscar..."></div>
+        <div class="col-md-3 text-end">
+            <button class="btn btn-primary btn-sm" onclick="carregarChamadas()">Atualizar</button>
+            <button class="btn btn-success btn-sm ms-1" onclick="exportarCSV()"><i class="bi bi-download"></i></button>
+        </div>
+    </div>
+</div>
+
+<div class="list-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Data</th>
+                    <th>Fila</th>
+                    <th>Cliente</th>
+                    <th>Agente</th>
+                    <th>Status</th>
+                    <th>Espera</th>
+                    <th>Duração</th>
+                    <th class="text-center">Áudio</th>
+                </tr>
+            </thead>
+            <tbody id="lista-chamadas"></tbody>
+        </table>
+    </div>
+    <div class="d-flex justify-content-between align-items-center p-3 border-top">
+        <div class="text-muted small"><span id="total-registros">0</span> registros</div>
+        <nav>
+            <ul class="pagination pagination-sm m-0" id="pagination-container"></ul>
+        </nav>
+    </div>
+</div>
+
+<div class="modal fade" id="audioModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h1 class="modal-title fs-5">Ouvir Gravação</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center">
+                <audio id="playerAudio" controls style="width: 100%;">
+                    Seu navegador não suporta áudio.
+                </audio>
+            </div>
+        </div>
+    </div>
+</div>
