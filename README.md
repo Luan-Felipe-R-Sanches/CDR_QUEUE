@@ -1,6 +1,3 @@
-
-
-````markdown
 # Analytics Pro - Call Center Dashboard & Realtime Monitor
 
 **Analytics Pro** é uma solução completa de monitoramento e relatórios para Call Centers baseados em **Asterisk** (Issabel/FreePBX). O sistema oferece uma interface web moderna (SPA) para análise histórica e um painel em tempo real (Wallboard) para gestão da operação.
