@@ -9,26 +9,17 @@ header('Content-Type: application/json; charset=utf-8');
 
 require_once 'config.php';
 
-// --- FUNÇÕES AUXILIARES ---
-
-function outputJSON($data) {
-    ob_end_clean();
-    echo json_encode($data);
-    exit;
-}
-
+function outputJSON($data) { ob_end_clean(); echo json_encode($data); exit; }
 function outputCSV($data, $filename, $headers) {
     ob_end_clean();
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename=' . $filename);
     $output = fopen('php://output', 'w');
-    fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF)); // BOM
+    fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
     fputcsv($output, $headers, ';');
     foreach ($data as $row) { fputcsv($output, $row, ';'); }
-    fclose($output);
-    exit;
+    fclose($output); exit;
 }
-
 function utf8ize($d) {
     if (is_array($d)) { foreach ($d as $k => $v) { $d[$k] = utf8ize($v); } } 
     else if (is_string($d)) { return mb_convert_encoding($d, 'UTF-8', 'UTF-8'); }
@@ -56,23 +47,18 @@ try {
     $offset = ($pagina - 1) * $limit;
     $params = ['inicio' => $inicio, 'fim' => $fim];
 
-    // --- CORREÇÃO DA BUSCA (Contextual) ---
     $where_busca = "";
     if (!empty($busca)) {
         $condicoes = [];
-        
-        // 1. Busca Padrão (Agente) - Funciona em todas
         $condicoes[] = "main.agent LIKE :busca";
         
-        // 2. Busca Específica (Só adiciona colunas extras se for LISTAR CHAMADAS)
         if ($acao === 'listar') {
             $condicoes[] = "main.callid LIKE :busca";
-            $condicoes[] = "sub.data2 LIKE :busca"; // <--- O erro estava aqui, agora está protegido
+            $condicoes[] = "sub.data2 LIKE :busca"; 
         }
 
         $params['busca'] = "%$busca%";
         
-        // Mapeamento de Nomes
         if (isset($map_agentes) && is_array($map_agentes)) {
             $i = 0;
             foreach ($map_agentes as $id => $nome) {
@@ -88,9 +74,7 @@ try {
     if ($status_filter === 'ATENDIDA') $where_status = " AND main.event IN ('COMPLETECALLER', 'COMPLETEAGENT', 'CONNECT') ";
     if ($status_filter === 'ABANDONO') $where_status = " AND main.event IN ('ABANDON', 'EXITWITHTIMEOUT', 'EXITWITHKEY') ";
 
-    // =========================================================
-    // AÇÃO 1: DASHBOARD
-    // =========================================================
+    // DASHBOARD
     if ($acao === 'dashboard') {
         $sql = "SELECT agent, event, data1, data2, data3, queuename FROM queue_log main WHERE time BETWEEN :inicio AND :fim AND event IN ('COMPLETECALLER', 'COMPLETEAGENT', 'CONNECT', 'ABANDON', 'EXITWITHTIMEOUT', 'PAUSE', 'RINGNOANSWER')";
         $stmt = $pdo->prepare($sql); $stmt->execute(['inicio'=>$inicio, 'fim'=>$fim]);
@@ -113,14 +97,11 @@ try {
             $ranking[]=['agente'=>$s['nome'],'fila'=>$s['fila'],'atendidas'=>$s['atendidas'],'pausas'=>$s['pausas'],'rejeitadas'=>$s['rejeitadas'],'tma'=>gmdate("H:i:s",$s['atendidas']>0?round($s['tempo']/$s['atendidas']):0)]; 
         }
         usort($ranking, function($a,$b){return $b['atendidas']-$a['atendidas'];});
-        
         $base_at = $kpis['atendidas']>0?$kpis['atendidas']:1; $base_tot = $kpis['total_geral']>0?$kpis['total_geral']:1;
         outputJSON(utf8ize(['status'=>'success','melhor_agente'=>$melhor,'kpis'=>['sla_percent'=>round(($kpis['sla_ok']/$base_at)*100,1),'abandono_percent'=>round(($kpis['abandono_lento']/$base_tot)*100,1),'longas_percent'=>round(($kpis['longas']/$base_at)*100,1),'total_absoluto'=>$kpis['atendidas']],'ranking'=>$ranking]));
     }
 
-    // =========================================================
-    // AÇÃO 2: LISTAR (Chamadas)
-    // =========================================================
+    // LISTAR (Chamadas)
     if ($acao === 'listar') {
         $sqlData = "SELECT main.time, main.callid, main.queuename, main.agent, main.event, main.data1, main.data2, main.data3, sub.data2 as numero_cliente
             FROM queue_log main LEFT JOIN queue_log sub ON (main.callid = sub.callid AND sub.event = 'ENTERQUEUE')
@@ -146,34 +127,36 @@ try {
                 'status_txt' => (strpos($row['event'], 'ABANDON') !== false || strpos($row['event'], 'EXIT') !== false) ? 'ABANDONO' : 'ATENDIDA',
                 'espera_fmt' => gmdate("H:i:s", (int)((strpos($row['event'], 'ABANDON') !== false) ? $row['data3'] : $row['data1'])),
                 'duracao_fmt' => gmdate("H:i:s", (int)((strpos($row['event'], 'ABANDON') !== false) ? 0 : $row['data2'])),
+                // NOVOS LINKS DE PLAYER E DOWNLOAD
                 'link_gravacao' => "player.php?id=" . $row['callid'] . "&date=" . date('Y-m-d', strtotime($row['time'])),
+                'link_download' => "player.php?id=" . $row['callid'] . "&date=" . date('Y-m-d', strtotime($row['time'])) . "&download=true",
                 'callid' => $row['callid']
             ];
             
-            if ($is_export) {
-                $finalData[] = [$item['data_fmt'], $item['nome_fila'], $item['numero_cliente'], $item['nome_agente'], $item['status_txt'], $item['espera_fmt'], $item['duracao_fmt'], $item['callid']];
-            } else {
-                $finalData[] = $item;
-            }
+            if ($is_export) $finalData[] = [$item['data_fmt'], $item['nome_fila'], $item['numero_cliente'], $item['nome_agente'], $item['status_txt'], $item['espera_fmt'], $item['duracao_fmt'], $item['callid']];
+            else $finalData[] = $item;
         }
 
         if ($is_export) {
             outputCSV($finalData, 'chamadas.csv', ['Data', 'Fila', 'Cliente', 'Agente', 'Status', 'Espera', 'Duracao', 'ID']);
         } else {
+            // CORREÇÃO DA PAGINAÇÃO AQUI
             $sqlCount = "SELECT COUNT(*) FROM queue_log main LEFT JOIN queue_log sub ON (main.callid = sub.callid AND sub.event = 'ENTERQUEUE')
                 WHERE main.time BETWEEN :inicio AND :fim AND main.event IN ('COMPLETECALLER', 'COMPLETEAGENT', 'ABANDON', 'EXITWITHTIMEOUT', 'EXITWITHKEY') $where_busca $where_status";
             $stmtC = $pdo->prepare($sqlCount);
             foreach ($params as $k => $v) $stmtC->bindValue(":$k", $v);
             $stmtC->execute();
-            outputJSON(utf8ize(['status' => 'success', 'data' => $finalData, 'total' => $stmtC->fetchColumn(), 'pages' => ceil($stmtC->fetchColumn() / $limit)]));
+            
+            // Pega o total UMA VEZ e guarda na variável
+            $total = (int)$stmtC->fetchColumn(); 
+            
+            outputJSON(utf8ize(['status' => 'success', 'data' => $finalData, 'total' => $total, 'pages' => ceil($total / $limit)]));
         }
     }
 
-    // =========================================================
-    // AÇÃO 3: PAUSAS
-    // =========================================================
+    // PAUSAS
     if ($acao === 'pausas') {
-        $sql = "SELECT time, agent, event, data1 as motivo FROM queue_log main WHERE time BETWEEN :inicio AND :fim AND (event LIKE 'PAUSE%' OR event LIKE 'UNPAUSE%') $where_busca ORDER BY agent, time ASC";
+        $sql = "SELECT time, agent, event, queuename FROM queue_log main WHERE time BETWEEN :inicio AND :fim AND (event LIKE 'PAUSE%' OR event LIKE 'UNPAUSE%') $where_busca ORDER BY agent, time ASC";
         $stmt = $pdo->prepare($sql);
         foreach ($params as $k => $v) if($k!=='busca') $stmt->bindValue(":$k", $v);
         if(!empty($busca)) $stmt->bindValue(':busca', "%$busca%");
@@ -185,31 +168,29 @@ try {
             $ag = trim(str_replace(['PJSIP/','SIP/','IAX2/'], '', $r['agent']));
             if ($ag == 'NONE' || empty($ag)) continue;
             if(strpos($r['event'], 'PAUSE') === 0 && strpos($r['event'], 'UNPAUSE') === false) {
-                $temp[$ag] = ['inicio' => $r['time'], 'motivo' => $r['motivo']];
+                $temp[$ag] = ['inicio' => $r['time'], 'fila_id' => $r['queuename']];
             } elseif(strpos($r['event'], 'UNPAUSE') === 0 && isset($temp[$ag])) {
                 $ini = strtotime($temp[$ag]['inicio']); $fim = strtotime($r['time']);
-                $motivo = (empty($temp[$ag]['motivo']) || $temp[$ag]['motivo'] == 'NONE') ? 'Pausa Geral' : $temp[$ag]['motivo'];
-                $item = ['agente' => isset($map_agentes[$ag])?$map_agentes[$ag]:$ag, 'inicio' => date('d/m/Y H:i:s', $ini), 'fim' => date('d/m/Y H:i:s', $fim), 'duracao' => gmdate("H:i:s", $fim - $ini), 'motivo' => ucfirst($motivo), 'ts' => $ini];
+                $fid = $temp[$ag]['fila_id'];
+                $nomeFila = (isset($map_filas[$fid])) ? $map_filas[$fid] : $fid;
+                if(empty($nomeFila) || $nomeFila == 'NONE') $nomeFila = 'Geral';
                 
-                if ($is_export) $pausas_completa[] = [$item['agente'], $item['motivo'], $item['inicio'], $item['fim'], $item['duracao']];
+                $item = ['agente' => isset($map_agentes[$ag])?$map_agentes[$ag]:$ag, 'inicio' => date('d/m/Y H:i:s', $ini), 'fim' => date('d/m/Y H:i:s', $fim), 'duracao' => gmdate("H:i:s", $fim - $ini), 'fila' => $nomeFila, 'ts' => $ini];
+                if ($is_export) $pausas_completa[] = [$item['agente'], $item['fila'], $item['inicio'], $item['fim'], $item['duracao']];
                 else $pausas_completa[] = $item;
                 unset($temp[$ag]);
             }
         }
 
-        if ($is_export) {
-            outputCSV($pausas_completa, 'pausas.csv', ['Agente', 'Motivo', 'Inicio', 'Fim', 'Duracao']);
-        } else {
+        if ($is_export) outputCSV($pausas_completa, 'pausas.csv', ['Agente', 'Fila', 'Inicio', 'Fim', 'Duracao']);
+        else {
             usort($pausas_completa, function($a, $b) { return $b['ts'] - $a['ts']; });
             $total = count($pausas_completa);
-            $dados = array_slice($pausas_completa, $offset, $limit);
-            outputJSON(utf8ize(['status' => 'success', 'data' => $dados, 'total' => $total, 'pages' => ceil($total / $limit)]));
+            outputJSON(utf8ize(['status' => 'success', 'data' => array_slice($pausas_completa, $offset, $limit), 'total' => $total, 'pages' => ceil($total / $limit)]));
         }
     }
 
-    // =========================================================
-    // AÇÃO 4: SESSÕES
-    // =========================================================
+    // SESSOES
     if ($acao === 'sessoes') {
         $sql = "SELECT time, agent, event, queuename FROM queue_log main WHERE time BETWEEN :inicio AND :fim AND event IN ('ADDMEMBER', 'REMOVEMEMBER', 'AGENTLOGIN', 'AGENTLOGOFF') $where_busca ORDER BY agent, time ASC";
         $stmt = $pdo->prepare($sql);
@@ -229,20 +210,17 @@ try {
                 $nome = isset($map_agentes[$ag])?$map_agentes[$ag]:$ag;
                 $fila = isset($map_filas[$temp[$ag]['fila']])?$map_filas[$temp[$ag]['fila']]:$temp[$ag]['fila'];
                 $item = ['agente' => $nome, 'fila' => $fila, 'entrada' => date('d/m/Y H:i:s', $ini), 'saida' => date('d/m/Y H:i:s', $fim), 'tempo_total' => gmdate("H:i:s", $fim - $ini), 'ts' => $ini];
-                
                 if ($is_export) $sessoes[] = [$item['agente'], $item['fila'], $item['entrada'], $item['saida'], $item['tempo_total']];
                 else $sessoes[] = $item;
                 unset($temp[$ag]);
             }
         }
 
-        if ($is_export) {
-            outputCSV($sessoes, 'sessoes.csv', ['Agente', 'Fila', 'Entrada', 'Saida', 'Tempo Logado']);
-        } else {
+        if ($is_export) outputCSV($sessoes, 'sessoes.csv', ['Agente', 'Fila', 'Entrada', 'Saida', 'Tempo Logado']);
+        else {
             usort($sessoes, function($a, $b) { return $b['ts'] - $a['ts']; });
             $total = count($sessoes);
-            $dados = array_slice($sessoes, $offset, $limit);
-            outputJSON(utf8ize(['status' => 'success', 'data' => $dados, 'total' => $total, 'pages' => ceil($total / $limit)]));
+            outputJSON(utf8ize(['status' => 'success', 'data' => array_slice($sessoes, $offset, $limit), 'total' => $total, 'pages' => ceil($total / $limit)]));
         }
     }
 
