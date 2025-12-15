@@ -1,75 +1,69 @@
 <?php
 // Arquivo: api.php
-header('Content-Type: application/json');
-require_once 'db.php'; // Sua conexão PDO já está aqui
+
+// 1. Define cabeçalho JSON (Importante!)
+header('Content-Type: application/json; charset=utf-8');
+
+// 2. Inicia buffer para capturar erros indevidos do PHP
+ob_start();
+
+// 3. Carrega o banco (O db.php já cuida da sessão, NÃO inicie session_start aqui)
+require_once 'db.php';
 require_once 'classes/NetmaxxiCore.php';
 
-// Validar Sessão
+// Limpa qualquer texto (avisos/erros) gerado pelos includes acima
+ob_end_clean(); 
+
+// 4. Verificação de Segurança
 if (!isset($_SESSION['user_id'])) {
-    echo json_encode(['status' => 'error', 'msg' => 'Não autorizado']);
+    echo json_encode(['status' => 'error', 'msg' => 'Sessão expirada. Faça login novamente.']);
     exit;
 }
 
-// Carrega config base (credenciais AMI)
-$config = require 'config.php';
-
-// --- MUDANÇA 1: CARREGAR FILAS DO BANCO ASTERISK ---
+// 5. Carrega Configurações
 try {
-    // A tabela queues_config geralmente fica no banco 'asterisk'
-    // Como estamos logados como root (ou user com permissão), podemos acessar com "asterisk.tabela"
-    $stmt = $pdo->query("SELECT extension, descr FROM asterisk.queues_config ORDER BY extension ASC");
+    $config = require 'config.php';
     
-    $filasDoBanco = [];
-    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        // Cria o array [ '9000' => 'ATENDIMENTO N1' ]
-        $filasDoBanco[$row['extension']] = $row['descr'];
+    // Tenta carregar filas do banco
+    try {
+        $stmt = $pdo->query("SELECT extension, descr FROM asterisk.queues_config ORDER BY extension ASC");
+        $filasDb = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $filasDb[$row['extension']] = $row['descr'];
+        }
+        if (!empty($filasDb)) $config['queues'] = $filasDb;
+    } catch (Exception $e) { /* Ignora erro de filas */ }
+
+    // Busca agentes
+    $stmt = $pdo->query("SELECT username, name FROM users");
+    $agentesDb = [];
+    while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $num = preg_replace('/[^0-9]/', '', $r['username']);
+        $agentesDb[$num] = $r['name'];
     }
-    
-    // Sobrescreve a configuração manual
-    if (!empty($filasDoBanco)) {
-        $config['queues'] = $filasDoBanco;
-    }
+    $config['agentes'] = $agentesDb;
 
-} catch (PDOException $e) {
-    // Se der erro (ex: banco asterisk não acessível), mantém o do config.php ou avisa
-    error_log("Erro ao ler filas do Asterisk: " . $e->getMessage());
-}
-
-// --- MUDANÇA 2: CARREGAR AGENTES DO BANCO NETMAXXI ---
-// (Isso já fizemos antes, mantendo aqui)
-$stmt = $pdo->query("SELECT username, name FROM users");
-$agentesDb = [];
-while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-    $num = preg_replace('/[^0-9]/', '', $row['username']);
-    $agentesDb[$num] = $row['name'];
-}
-$config['agentes'] = $agentesDb;
-
-
-// --- INICIA O CORE ---
-$action = $_POST['action'] ?? $_GET['action'] ?? '';
-
-try {
+    // 6. Executa a Lógica
     $core = new \Netmaxxi\NetmaxxiCore($config);
+    $action = $_REQUEST['action'] ?? '';
 
-    if ($action === 'control') {
+    if ($action === 'monitor') {
+        $data = $core->getQueueLiveStatus($config['queues']);
+        echo json_encode(['status' => 'ok', 'data' => $data]);
+    } 
+    elseif ($action === 'control') {
         $type = $_POST['type'] ?? '';
         $queue = $_POST['queue'] ?? '';
         $interface = $_SESSION['user_tech'] . '/' . $_SESSION['user_name'];
-        
-        if (empty($type) || empty($queue)) throw new \Exception("Dados incompletos.");
-
-        $result = $core->agentAction($type, $queue, $interface);
-        $response = ['status' => $result['success'] ? 'ok' : 'error', 'msg' => $result['message']];
-
-    } elseif ($action === 'monitor') {
-        // Agora ele monitora as filas dinâmicas do banco!
-        $data = $core->getQueueLiveStatus($config['queues']);
-        $response = ['status' => 'ok', 'data' => $data];
+        $res = $core->agentAction($type, $queue, $interface);
+        echo json_encode(['status' => $res['success']?'ok':'error', 'msg' => $res['message']]);
+    } 
+    else {
+        echo json_encode(['status' => 'error', 'msg' => 'Ação inválida']);
     }
 
-} catch (\Exception $e) {
-    $response = ['status' => 'error', 'msg' => $e->getMessage()];
+} catch (Exception $e) {
+    // Retorna erro formatado em JSON para o Frontend ler
+    echo json_encode(['status' => 'error', 'msg' => 'Erro interno: ' . $e->getMessage()]);
 }
-
-echo json_encode($response);
+?>

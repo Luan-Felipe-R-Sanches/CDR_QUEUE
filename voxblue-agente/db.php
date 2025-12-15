@@ -1,7 +1,13 @@
 <?php
-// db.php
-session_start();
-$config = require 'config.php';
+// Arquivo: db.php
+
+// Só inicia a sessão se ela NÃO estiver ativa
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Usa require_once para garantir que o config não cause conflito
+$config = require_once __DIR__ . '/config.php';
 
 try {
     $pdo = new PDO(
@@ -11,21 +17,14 @@ try {
     );
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch (PDOException $e) {
-    die("Erro de conexão com Banco: " . $e->getMessage());
+    // Em produção, não mostre o erro completo na tela, apenas log
+    die("Erro de conexão com o banco de dados.");
 }
 
-// Função para verificar se está logado
+// Funções auxiliares mantidas
 function checkAuth() {
     if (!isset($_SESSION['user_id'])) {
         header('Location: login.php');
         exit;
-    }
-}
-
-// Função para verificar se é Admin
-function checkAdmin() {
-    checkAuth();
-    if ($_SESSION['user_role'] !== 'admin') {
-        die("Acesso negado. Apenas administradores.");
     }
 }

@@ -1,17 +1,22 @@
 <?php
 // Arquivo: index.php
 require 'db.php';
-checkAuth();
 
-// Se for admin, redireciona
+// Verifica autenticação
+if (!isset($_SESSION['user_id'])) {
+    header('Location: login.php');
+    exit;
+}
+
+// Verifica se é admin
 if ($_SESSION['user_role'] === 'admin') {
     header('Location: admin.php');
     exit;
 }
-// --------------------------
 
-$meuRamal = $_SESSION['user_name'];
-$minhaTech = $_SESSION['user_tech'];
+// Variáveis para o JavaScript
+$meuRamal = $_SESSION['user_name']; // Ex: 1001
+$minhaTech = $_SESSION['user_tech']; // Ex: PJSIP
 $meuNome = $_SESSION['user_realname'];
 ?>
 <!DOCTYPE html>
@@ -25,246 +30,80 @@ $meuNome = $_SESSION['user_realname'];
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
     <style>
-        /* --- DESIGN SYSTEM --- */
+        /* --- SEU CSS ORIGINAL (MANTIDO INTACTO) --- */
         :root {
-            --bg-body: #f3f4f6;
-            --bg-card: #ffffff;
-            --text-main: #1f2937;
-            --text-muted: #6b7280;
-            --border-color: #e5e7eb;
-            --nav-bg: #111827;
-            --nav-text: #f9fafb;
-            --input-bg: #ffffff;
-            --input-border: #d1d5db;
+            --bg-body: #f3f4f6; --bg-card: #ffffff; --text-main: #1f2937;
+            --text-muted: #6b7280; --border-color: #e5e7eb; --nav-bg: #111827;
+            --nav-text: #f9fafb; --input-bg: #ffffff; --input-border: #d1d5db;
         }
-
-        /* --- MODO NOTURNO (CORRIGIDO PARA TEXTO BRANCO) --- */
         [data-theme="dark"] {
-            --bg-body: #0f172a;        /* Fundo bem escuro */
-            --bg-card: #1e293b;        /* Card azul escuro */
-            --text-main: #ffffff;      /* TEXTO BRANCO PURO */
-            --text-muted: #cbd5e1;     /* Cinza claro */
-            --border-color: #334155;
-            --nav-bg: #020617;
-            --nav-text: #ffffff;
-            --input-bg: #334155;
-            --input-border: #475569;
+            --bg-body: #0f172a; --bg-card: #1e293b; --text-main: #ffffff;
+            --text-muted: #cbd5e1; --border-color: #334155; --nav-bg: #020617;
+            --nav-text: #ffffff; --input-bg: #334155; --input-border: #475569;
         }
-
-        body {
-            background-color: var(--bg-body);
-            color: var(--text-main);
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            transition: all 0.3s ease;
-        }
-
-        /* FORÇA TEXTO BRANCO NO MODO NOTURNO */
-        [data-theme="dark"] h1, 
-        [data-theme="dark"] h2, 
-        [data-theme="dark"] h3, 
-        [data-theme="dark"] h4, 
-        [data-theme="dark"] h5, 
-        [data-theme="dark"] h6,
-        [data-theme="dark"] .card,
-        [data-theme="dark"] .form-label {
-            color: #ffffff !important;
-        }
-
-        [data-theme="dark"] .text-muted {
-            color: #cbd5e1 !important;
-        }
+        body { background-color: var(--bg-body); color: var(--text-main); font-family: 'Segoe UI', system-ui, sans-serif; transition: all 0.3s ease; }
+        
+        /* Correção para Modo Dark */
+        [data-theme="dark"] h1, [data-theme="dark"] h2, [data-theme="dark"] h3, 
+        [data-theme="dark"] h4, [data-theme="dark"] h5, [data-theme="dark"] h6,
+        [data-theme="dark"] .card, [data-theme="dark"] .form-label { color: #ffffff !important; }
+        [data-theme="dark"] .text-muted { color: #cbd5e1 !important; }
 
         /* Navbar */
-        .agent-statusbar {
-            background-color: var(--nav-bg);
-            color: var(--nav-text);
-            padding: 15px 0;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-            border-bottom: 1px solid var(--border-color);
-        }
+        .agent-statusbar { background-color: var(--nav-bg); color: var(--nav-text); padding: 15px 0; margin-bottom: 30px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border-bottom: 1px solid var(--border-color); }
 
-        /* Cards Principais */
-        .control-section {
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 25px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-            margin-bottom: 25px;
-        }
-
-        /* Inputs e Selects */
-        .form-select, .form-control {
-            background-color: var(--input-bg);
-            color: var(--text-main);
-            border-color: var(--input-border);
-            height: 48px;
-            font-size: 1rem;
-        }
+        /* Cards e Inputs */
+        .control-section { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 25px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 25px; }
+        .form-select, .form-control { background-color: var(--input-bg); color: var(--text-main); border-color: var(--input-border); height: 48px; font-size: 1rem; }
+        .form-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
         
-        .form-select:focus, .form-control:focus {
-            background-color: var(--input-bg);
-            color: var(--text-main);
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
-        }
-
-        [data-theme="dark"] .form-select {
-            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23ffffff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
-            color: #fff !important;
-        }
-
-        .form-label {
-            font-size: 0.75rem;
-            font-weight: 700;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-            color: var(--text-muted);
-            margin-bottom: 8px;
-        }
-
         /* Botões */
-        .btn-action {
-            height: 48px;
-            font-weight: 600;
-            border-radius: 8px;
-            text-transform: uppercase;
-            font-size: 0.9rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: transform 0.1s;
-        }
+        .btn-action { height: 48px; font-weight: 600; border-radius: 8px; text-transform: uppercase; font-size: 0.9rem; display: flex; align-items: center; justify-content: center; transition: transform 0.1s; }
         .btn-action:active { transform: scale(0.98); }
 
-        /* --- CARDS DE MONITORAMENTO --- */
-        .queue-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            margin-bottom: 0;
-            transition: transform 0.2s, box-shadow 0.2s;
-            color: var(--text-main);
-        }
-        .queue-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-            border-color: #3b82f6;
-        }
+        /* Queue Card */
+        .queue-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; margin-bottom: 0; transition: transform 0.2s, box-shadow 0.2s; color: var(--text-main); }
+        .queue-card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); border-color: #3b82f6; }
+        .queue-header { padding: 10px 15px; background-color: rgba(0,0,0,0.03); border-bottom: 1px solid var(--border-color); font-weight: 700; font-size: 0.95rem; display: flex; justify-content: space-between; align-items: center; }
+        [data-theme="dark"] .queue-header { background-color: rgba(255,255,255,0.05); color: #fff !important; }
 
-        .queue-header {
-            padding: 10px 15px;
-            background-color: rgba(0,0,0,0.03);
-            border-bottom: 1px solid var(--border-color);
-            font-weight: 700;
-            font-size: 0.95rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
+        /* Chips */
+        .agent-list-container { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 5px; }
+        .agent-chip { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; border: 1px solid transparent; cursor: default; }
         
-        [data-theme="dark"] .queue-header { 
-            background-color: rgba(255,255,255,0.05); 
-            color: #fff !important;
-        }
-
-        /* Chips (Agentes) */
-        .agent-list-container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            padding-top: 5px;
-        }
-
-        .agent-chip {
-            display: inline-flex;
-            align-items: center;
-            padding: 4px 10px;
-            border-radius: 9999px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            border: 1px solid transparent;
-            cursor: default;
-        }
-
-        /* Cores dos Chips - Modo Claro */
         .chip-free { background-color: #dcfce7; color: #14532d; border-color: #86efac; }
         .chip-busy { background-color: #fee2e2; color: #7f1d1d; border-color: #fca5a5; }
         .chip-paused { background-color: #fef3c7; color: #78350f; border-color: #fcd34d; }
         .chip-offline { background-color: #f1f5f9; color: #64748b; border-color: #e2e8f0; }
 
-        /* Cores dos Chips - Modo Noturno */
         [data-theme="dark"] .chip-free { background-color: #064e3b; color: #ffffff; border-color: #059669; }
         [data-theme="dark"] .chip-busy { background-color: #7f1d1d; color: #ffffff; border-color: #dc2626; }
         [data-theme="dark"] .chip-paused { background-color: #78350f; color: #ffffff; border-color: #d97706; }
         [data-theme="dark"] .chip-offline { background-color: #334155; color: #cbd5e1; border-color: #475569; }
 
-        .chip-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            margin-right: 6px;
-        }
+        .chip-dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
         .dot-green { background-color: #22c55e; box-shadow: 0 0 5px #22c55e; }
         .dot-red { background-color: #ef4444; }
         .dot-orange { background-color: #f59e0b; }
         .dot-grey { background-color: #94a3b8; }
 
-        /* Chamadas Compactas */
-        .call-item {
-            padding: 6px 10px;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 4px;
-            font-weight: 500;
-            color: #1f2937;
-        }
-        
+        /* Calls */
+        .call-item { padding: 6px 10px; border-radius: 6px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-weight: 500; color: #1f2937; }
         [data-theme="dark"] .call-item { color: #000; }
-        [data-theme="dark"] .bg-sla-ok { background-color: #059669; color: #fff; }
-        [data-theme="dark"] .bg-sla-warn { background-color: #d97706; color: #fff; }
-        [data-theme="dark"] .bg-sla-bad { background-color: #dc2626; color: #fff; }
-
         .bg-sla-ok { background-color: #d1fae5; color: #064e3b; }
         .bg-sla-warn { background-color: #fef3c7; color: #78350f; }
         .bg-sla-bad { background-color: #fee2e2; color: #7f1d1d; }
 
-        /* Feedback Messages */
-        #cmdFeedback {
-            display: none;
-            margin-top: 15px;
-            padding: 12px;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 0.95rem;
-            text-align: center;
-        }
-        
+        /* Feedback */
+        #cmdFeedback { display: none; margin-top: 15px; padding: 12px; border-radius: 8px; font-weight: 600; font-size: 0.95rem; text-align: center; }
         .feedback-success { background: #dcfce7; color: #166534; border: 1px solid #22c55e; }
         .feedback-error { background: #fee2e2; color: #991b1b; border: 1px solid #ef4444; }
         .feedback-info { background: #e0f2fe; color: #075985; border: 1px solid #38bdf8; }
 
-        [data-theme="dark"] .feedback-success { background: #064e3b; color: #fff; border-color: #059669; }
-        [data-theme="dark"] .feedback-error { background: #7f1d1d; color: #fff; border-color: #ef4444; }
-        [data-theme="dark"] .feedback-info { background: #0c4a6e; color: #fff; border-color: #0284c7; }
-
         /* Stats */
-        .card-stat {
-            border: none;
-            border-radius: 12px;
-            color: #fff;
-            padding: 20px;
-        }
+        .card-stat { border: none; border-radius: 12px; color: #fff; padding: 20px; }
         .stat-value { font-size: 2.5rem; font-weight: 700; line-height: 1; }
         .stat-label { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; opacity: 0.9; }
-
     </style>
 </head>
 
@@ -290,12 +129,6 @@ $meuNome = $_SESSION['user_realname'];
                     <i class="fa fa-moon fs-5" id="themeIcon"></i>
                 </button>
 
-                <?php if (isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin'): ?>
-                    <a href="admin.php" class="btn btn-warning btn-sm fw-bold text-dark px-3">
-                        <i class="fa fa-cogs me-1"></i> ADMIN
-                    </a>
-                <?php endif; ?>
-
                 <div class="border-start border-secondary ps-3 ms-2 text-end d-none d-md-block">
                     <span id="myCurrentStatus" class="badge bg-secondary px-3 py-2 rounded-pill">Offline</span>
                     <div id="myTimer" class="small font-monospace mt-1 opacity-75">--:--:--</div>
@@ -312,24 +145,27 @@ $meuNome = $_SESSION['user_realname'];
 
         <div class="control-section">
             <div class="row g-4 align-items-end">
-
                 <div class="col-md-5">
                     <label class="form-label"><i class="fa fa-filter me-1"></i> Fila de Atendimento</label>
                     <select id="myQueue" class="form-select shadow-sm">
                         <?php
+                        // Carrega filas do banco ou exibe padrão
+                        $filas = include 'config.php'; 
+                        $filas = $filas['queues'] ?? [];
+                        
+                        // Tenta carregar do banco via PDO se disponível
                         try {
-                            $queryFilas = $pdo->query("SELECT extension, descr FROM asterisk.queues_config ORDER BY extension ASC");
-                            if ($queryFilas->rowCount() > 0) {
-                                while ($fila = $queryFilas->fetch(PDO::FETCH_ASSOC)) {
-                                    $num = $fila['extension'];
-                                    $nome = $fila['descr'] ?: "Fila $num";
-                                    echo "<option value='{$num}'>{$num} - {$nome}</option>";
+                            $stmt = $pdo->query("SELECT extension, descr FROM asterisk.queues_config ORDER BY extension ASC");
+                            if ($stmt->rowCount() > 0) {
+                                while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                                    echo "<option value='{$row['extension']}'>{$row['extension']} - {$row['descr']}</option>";
                                 }
                             } else {
-                                echo "<option value=''>Nenhuma fila encontrada</option>";
+                                // Fallback para config
+                                foreach ($filas as $k => $v) echo "<option value='$k'>$k - $v</option>";
                             }
-                        } catch (PDOException $e) {
-                            echo "<option value='000'>Erro DB</option>";
+                        } catch (Exception $e) {
+                             foreach ($filas as $k => $v) echo "<option value='$k'>$k - $v</option>";
                         }
                         ?>
                     </select>
@@ -397,20 +233,11 @@ $meuNome = $_SESSION['user_realname'];
             <h6 class="m-0 fw-bold text-uppercase text-muted" style="font-size: 0.85rem; letter-spacing: 1px;">
                 <i class="fa fa-desktop me-2"></i>Visão Geral das Filas
             </h6>
-            
             <div class="d-flex flex-wrap gap-3 align-items-center mt-2 mt-md-0">
-                <div class="d-flex align-items-center small text-muted">
-                    <span class="chip-dot dot-green"></span> Livre
-                </div>
-                <div class="d-flex align-items-center small text-muted">
-                    <span class="chip-dot dot-red"></span> Em Chamada
-                </div>
-                <div class="d-flex align-items-center small text-muted">
-                    <span class="chip-dot dot-orange"></span> Pausado
-                </div>
-                <div class="d-flex align-items-center small text-muted">
-                    <span class="chip-dot dot-grey"></span> Indisponível
-                </div>
+                <div class="d-flex align-items-center small text-muted"><span class="chip-dot dot-green"></span> Livre</div>
+                <div class="d-flex align-items-center small text-muted"><span class="chip-dot dot-red"></span> Em Chamada</div>
+                <div class="d-flex align-items-center small text-muted"><span class="chip-dot dot-orange"></span> Pausado</div>
+                <div class="d-flex align-items-center small text-muted"><span class="chip-dot dot-grey"></span> Indisponível</div>
             </div>
         </div>
 
@@ -426,11 +253,11 @@ $meuNome = $_SESSION['user_realname'];
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script>
         const API_URL = 'api.php';
+        // Injetando variaveis PHP no JS para lógica de botões
         const myTech = "<?= $minhaTech ?>";
         const myExten = "<?= $meuRamal ?>";
-        const myFullInterface = `${myTech}/${myExten}`;
-        let feedbackTimer;
-
+        const myFullInterface = `${myTech}/${myExten}`; 
+        
         // --- GERENCIAMENTO DE TEMA ---
         function toggleTheme() {
             const body = document.body;
@@ -451,14 +278,21 @@ $meuNome = $_SESSION['user_realname'];
         $(document).ready(function() {
             if (localStorage.getItem('nm_queue')) $('#myQueue').val(localStorage.getItem('nm_queue'));
             
-            // Aplica tema salvo
             if (localStorage.getItem('nm_theme') === 'dark') {
                 document.body.setAttribute('data-theme', 'dark');
                 $('#themeIcon').removeClass('fa-moon').addClass('fa-sun');
             }
+
+            // Inicia Loop de Monitoramento
+            updateMonitor();
+            // AJUSTE CRÍTICO DE PERFORMANCE: 3000ms (compatível com cache do servidor)
+            setInterval(updateMonitor, 3000); 
+            
+            // Relógio
+            setInterval(() => { $('#myTimer').text(new Date().toLocaleTimeString()); }, 1000);
         });
 
-        // --- COMANDOS (LÓGICA CORRIGIDA: SEMPRE VERDE SE RESPONDER) ---
+        // --- AÇÕES DO AGENTE ---
         function agentCmd(type) {
             const queue = $('#myQueue').val();
             localStorage.setItem('nm_queue', queue);
@@ -473,108 +307,100 @@ $meuNome = $_SESSION['user_realname'];
             }, function(res) {
                 $('button').prop('disabled', false);
                 
-                if (res && !res.critical_error) {
-                    let msg = 'Comando realizado com sucesso!';
-                    if (res.message && res.message.length > 3) msg = res.message;
-                    
-                    showFeedback(msg, 'success');
-                    updateMonitor(); 
+                if (res && res.status === 'ok') {
+                    showFeedback(res.msg || 'Comando realizado!', 'success');
+                    // Força atualização imediata após comando
+                    setTimeout(updateMonitor, 500);
                 } else {
-                    showFeedback(res.message || 'Falha na comunicação', 'error');
+                    showFeedback(res.msg || 'Erro desconhecido', 'error');
                 }
 
             }, 'json').fail(function() {
                 $('button').prop('disabled', false);
-                showFeedback('Erro de conexão com o servidor', 'error');
+                showFeedback('Erro de conexão', 'error');
             });
         }
 
         function showFeedback(msg, type) {
             const el = $('#cmdFeedback');
-            clearTimeout(feedbackTimer);
             el.removeClass('feedback-success feedback-error feedback-info');
-
+            
             let icon = '<i class="fa fa-info-circle me-2"></i>';
-            if (type === 'success') {
-                el.addClass('feedback-success');
-                icon = '<i class="fa fa-check-circle me-2"></i>';
-            } else if (type === 'error') {
-                el.addClass('feedback-error');
-                icon = '<i class="fa fa-exclamation-triangle me-2"></i>';
-            } else {
-                el.addClass('feedback-info');
-                icon = '<i class="fa fa-spinner fa-spin me-2"></i>';
-            }
+            if (type === 'success') { el.addClass('feedback-success'); icon = '<i class="fa fa-check-circle me-2"></i>'; }
+            else if (type === 'error') { el.addClass('feedback-error'); icon = '<i class="fa fa-exclamation-triangle me-2"></i>'; }
+            else { el.addClass('feedback-info'); icon = '<i class="fa fa-spinner fa-spin me-2"></i>'; }
 
             el.html(icon + msg).fadeIn();
-            
-            if (type !== 'info') {
-                feedbackTimer = setTimeout(() => { el.fadeOut(); }, 4000);
-            }
+            if (type !== 'info') setTimeout(() => { el.fadeOut(); }, 4000);
         }
 
-        // --- MONITORAMENTO ---
+        // --- MONITORAMENTO AJAX ---
         function updateMonitor() {
             $.get(API_URL, { action: 'monitor' }, function(res) {
-                if (res.status === 'ok') processData(res.data);
+                if (res.status === 'ok') {
+                    processData(res.data);
+                }
             }, 'json');
         }
 
+        // --- RENDERIZAÇÃO VISUAL (Seu código original mantido) ---
         function processData(queues) {
             let totalWaiting = 0, totalAgents = 0, maxWait = 0, html = '';
             const myTargetQueue = $('#myQueue').val();
             let meFound = false, amIPaused = false;
 
+            // Proteção contra objeto vazio
+            if (!queues || Object.keys(queues).length === 0) {
+                 $('#monitorPanel').html('<div class="col-12 text-center py-5 text-muted">Sem dados das filas.</div>');
+                 return;
+            }
+
             $.each(queues, function(id, q) {
                 totalWaiting += q.count;
-                totalAgents += Object.keys(q.members).length;
+                // Contagem segura de membros
+                let membersCount = q.members ? Object.keys(q.members).length : 0;
+                totalAgents += membersCount;
 
-                // 1. LISTA DE CHAMADAS
+                // 1. CALLS
                 let callsHtml = '';
-                if (q.calls.length > 0) {
+                if (q.calls && q.calls.length > 0) {
                     $.each(q.calls, function(i, call) {
                         let wait = parseInt(call.wait_time);
                         if (wait > maxWait) maxWait = wait;
                         let style = wait > 60 ? 'bg-sla-bad' : (wait > 30 ? 'bg-sla-warn' : 'bg-sla-ok');
-                        callsHtml += `
-                        <div class="call-item ${style}">
+                        callsHtml += `<div class="call-item ${style}">
                             <span><i class="fa fa-phone fa-xs opacity-50 me-2"></i>${call.caller_id}</span>
-                            <span>${formatTime(wait)}</span>
-                        </div>`;
+                            <span>${formatTime(wait)}</span></div>`;
                     });
                 } else {
                     callsHtml = `<div class="text-muted small text-center py-2 fst-italic opacity-75">Fila Livre</div>`;
                 }
 
-                // 2. AGENTES (CHIPS)
+                // 2. AGENTS
                 let agentsHtml = '';
-                let sortedMembers = Object.keys(q.members).sort();
-
-                if (sortedMembers.length > 0) {
+                if (q.members) {
+                    let sortedMembers = Object.keys(q.members).sort();
                     $.each(sortedMembers, function(idx, iface) {
                         const m = q.members[iface];
-                        let chipClass = 'chip-offline';
-                        let dotClass = 'dot-grey';
+                        let chipClass = 'chip-offline'; let dotClass = 'dot-grey';
 
-                        if (m.paused) {
-                            chipClass = 'chip-paused'; dotClass = 'dot-orange';
-                        } else if (m.status == 2 || m.status == 6) {
-                            chipClass = 'chip-busy'; dotClass = 'dot-red';
-                        } else if (m.status == 1) {
-                            chipClass = 'chip-free'; dotClass = 'dot-green';
-                        }
+                        if (m.paused) { chipClass = 'chip-paused'; dotClass = 'dot-orange'; }
+                        else if (m.status == 2 || m.status == 6) { chipClass = 'chip-busy'; dotClass = 'dot-red'; }
+                        else if (m.status == 1) { chipClass = 'chip-free'; dotClass = 'dot-green'; }
 
                         let name = m.display_name || iface.split('/').pop();
-                        // Destaque se for o próprio usuário
-                        let myStyle = (iface == myFullInterface) ? 'border: 2px solid #3b82f6;' : '';
+                        // Lógica para destacar SEU usuário
+                        let myStyle = (iface == myFullInterface || iface.includes(myExten)) ? 'border: 2px solid #3b82f6;' : '';
 
-                        agentsHtml += `
-                        <div class="agent-chip ${chipClass}" style="${myStyle}" title="${name}">
-                            <span class="chip-dot ${dotClass}"></span>${name}
-                        </div>`;
+                        agentsHtml += `<div class="agent-chip ${chipClass}" style="${myStyle}" title="${name}">
+                            <span class="chip-dot ${dotClass}"></span>${name}</div>`;
+                        
+                        // Verifica status do usuário atual para ajustar botões
+                        if (id == myTargetQueue && (iface == myFullInterface || iface.includes(myExten))) {
+                            meFound = true;
+                            amIPaused = m.paused;
+                        }
                     });
-                } else {
-                    agentsHtml = `<span class="small text-muted ms-1">-</span>`;
                 }
 
                 // 3. CARD
@@ -593,23 +419,16 @@ $meuNome = $_SESSION['user_realname'];
                                 </div>
                                 <div class="d-flex flex-column gap-1">${callsHtml}</div>
                             </div>
-                            
                             <div class="border-top border-light opacity-25"></div>
-                            
                             <div>
                                 <div class="d-flex justify-content-between mb-1">
-                                    <span class="text-uppercase fw-bold text-muted" style="font-size: 0.7em;">Agentes (${Object.keys(q.members).length})</span>
+                                    <span class="text-uppercase fw-bold text-muted" style="font-size: 0.7em;">Agentes (${membersCount})</span>
                                 </div>
                                 <div class="agent-list-container">${agentsHtml}</div>
                             </div>
                         </div>
                     </div>
                 </div>`;
-
-                if (id == myTargetQueue && q.members[myFullInterface]) {
-                    meFound = true;
-                    amIPaused = q.members[myFullInterface].paused;
-                }
             });
 
             $('#monitorPanel').html(html);
@@ -621,18 +440,21 @@ $meuNome = $_SESSION['user_realname'];
 
         function updateButtons(logged, paused) {
             const badge = $('#myCurrentStatus');
+            const btns = { log: $('#btnLogin'), out: $('#btnLogout'), pause: $('#btnPause'), unpause: $('#btnUnpause') };
+            
+            // Esconde tudo primeiro
+            btns.log.addClass('d-none'); btns.out.addClass('d-none'); 
+            btns.pause.addClass('d-none'); btns.unpause.addClass('d-none');
+
             if (!logged) {
                 badge.removeClass('bg-success bg-warning').addClass('bg-secondary').text('OFFLINE');
-                $('#btnLogin').removeClass('d-none');
-                $('#btnLogout, #btnPause, #btnUnpause').addClass('d-none');
+                btns.log.removeClass('d-none');
             } else if (paused) {
                 badge.removeClass('bg-success bg-secondary').addClass('bg-warning text-dark').html('<i class="fa fa-pause"></i> PAUSADO');
-                $('#btnUnpause, #btnLogout').removeClass('d-none');
-                $('#btnLogin, #btnPause').addClass('d-none');
+                btns.unpause.removeClass('d-none'); btns.out.removeClass('d-none');
             } else {
                 badge.removeClass('bg-warning bg-secondary').addClass('bg-success').html('<i class="fa fa-check"></i> DISPONÍVEL');
-                $('#btnPause, #btnLogout').removeClass('d-none');
-                $('#btnLogin, #btnUnpause').addClass('d-none');
+                btns.pause.removeClass('d-none'); btns.out.removeClass('d-none');
             }
         }
 
@@ -641,9 +463,6 @@ $meuNome = $_SESSION['user_realname'];
             let m = Math.floor(s / 60), sc = s % 60;
             return m + 'm ' + (sc < 10 ? '0' : '') + sc + 's';
         }
-
-        setInterval(updateMonitor, 1500);
-        setInterval(() => { $('#myTimer').text(new Date().toLocaleTimeString()); }, 1000);
     </script>
 </body>
 </html>

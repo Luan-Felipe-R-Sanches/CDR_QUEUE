@@ -1,4 +1,4 @@
-# Arquivo: server.py
+# Arquivo: server.py (OTIMIZADO)
 import time
 import threading
 import requests
@@ -6,34 +6,45 @@ import mysql.connector
 import re
 import socket
 from datetime import datetime
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
+import os
+from dotenv import load_dotenv
 
-# --- CONFIGURAÇÕES ---
+# --- CONFIGURAÇÕES CARREGADAS DO .ENV ---
 DB_CONFIG = {
-    'host': 'localhost',
-    'user': 'root',
-    'password': 'n3tware385br', 
-    'database': 'netmaxxi_callcenter'
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'user': os.getenv('DB_USER'),
+    'password': os.getenv('DB_PASS'),
+    'database': os.getenv('DB_NAME')
 }
 
-# ARI (Para Canais e Ramais)
-ARI_URL = "http://127.0.0.1:8088/ari"
-ARI_AUTH = ('admin', 'n3tware385br')
+# ARI
+ARI_URL = os.getenv('ARI_URL')
+ARI_AUTH = (os.getenv('ARI_USER'), os.getenv('ARI_PASS'))
 
-# AMI (Para Filas)
-AMI_HOST = '127.0.0.1'
-AMI_PORT = 5038
-AMI_USER = 'php_dashboard'
-AMI_PASS = 'senha_segura_ami'
+# AMI
+AMI_HOST = os.getenv('AMI_HOST', '127.0.0.1')
+AMI_PORT = int(os.getenv('AMI_PORT', 5038))
+AMI_USER = os.getenv('AMI_USER')
+AMI_PASS = os.getenv('AMI_PASS')
 
 app = Flask(__name__)
 CORS(app)
 
+# Estado Global
 CACHE = {
     'ramais': [],
     'troncos': {'total': 0, 'lista': []},
     'filas': []
+}
+
+# Dados estáticos (atualizados raramente)
+STATIC_DATA = {
+    'ramais_db': {},
+    'filas_map': {},
+    'troncos_allowlist': [],
+    'last_update': 0
 }
 
 def log(msg):
@@ -47,33 +58,57 @@ def clean_num(val):
     if not val: return ""
     return ''.join(filter(str.isdigit, str(val)))
 
-# --- FUNÇÃO DE FILAS (AMI) RESTAURADA ---
-def get_ami_queues(nomes_filas):
+def refresh_static_data():
+    """ Carrega dados do banco apenas a cada 60s para economizar recursos """
+    now = time.time()
+    if now - STATIC_DATA['last_update'] < 60 and STATIC_DATA['last_update'] > 0:
+        return
+
+    try:
+        conn = get_db()
+        if conn:
+            cursor = conn.cursor(dictionary=True)
+            
+            # Ramais
+            cursor.execute("SELECT id, description FROM asterisk.devices")
+            STATIC_DATA['ramais_db'] = {str(r['id']): r['description'] for r in cursor.fetchall()}
+            
+            # Filas
+            cursor.execute("SELECT extension, descr FROM asterisk.queues_config")
+            STATIC_DATA['filas_map'] = {str(r['extension']): r['descr'] for r in cursor.fetchall()}
+
+            # Troncos
+            STATIC_DATA['troncos_allowlist'] = []
+            cursor.execute("SELECT name FROM asterisk.trunks WHERE disabled = 'off'")
+            for r in cursor.fetchall():
+                if r['name']: STATIC_DATA['troncos_allowlist'].append(str(r['name']).strip().lower())
+            
+            conn.close()
+            STATIC_DATA['last_update'] = now
+            # log("Dados estáticos (DB) atualizados.")
+    except Exception as e:
+        log(f"Erro ao atualizar DB: {e}")
+
+def get_ami_queues():
     filas_data = []
-    sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
+        sock.settimeout(1) # Timeout baixo para não travar
         sock.connect((AMI_HOST, AMI_PORT))
-        
         sock.sendall(f"Action: Login\r\nUsername: {AMI_USER}\r\nSecret: {AMI_PASS}\r\n\r\n".encode())
-        time.sleep(0.1)
+        time.sleep(0.05)
         sock.sendall(b"Action: QueueSummary\r\n\r\n")
         
         buffer = b""
         start = time.time()
-        while time.time() - start < 2:
+        while time.time() - start < 1.5:
             chunk = sock.recv(4096)
             buffer += chunk
             if b"EventList: Complete" in buffer: break
-        
-        sock.sendall(b"Action: Logoff\r\n\r\n")
         sock.close()
         
         texto = buffer.decode('utf-8', errors='ignore')
-        eventos = texto.split('Event: QueueSummary')
-        
-        for evt in eventos:
+        for evt in texto.split('Event: QueueSummary'):
             if 'Queue:' not in evt: continue
             data = {}
             for line in evt.splitlines():
@@ -85,67 +120,43 @@ def get_ami_queues(nomes_filas):
             if q_num and q_num != 'default':
                 filas_data.append({
                     'numero': q_num,
-                    'nome': nomes_filas.get(q_num, f"Fila {q_num}"),
+                    'nome': STATIC_DATA['filas_map'].get(q_num, f"Fila {q_num}"),
                     'logados': data.get('LoggedIn', '0'),
                     'espera': data.get('Callers', '0'),
                     'tma': data.get('HoldTime', '0'),
                     'abandonadas': data.get('Abandoned', '0'),
                     'completo': data.get('Completed', '0')
                 })
-    except:
-        pass
+    except: pass
     return filas_data
 
 def update_loop():
     global CACHE
-    log("Servidor V9: Full Stack (Ramais + Filas + Troncos + Internas)...")
+    log("Servidor OTIMIZADO V10 Iniciado...")
     
     while True:
+        loop_start = time.time()
         try:
-            # 1. Carrega Dados do Banco
-            ramais_db = {}
-            filas_map = {}
-            troncos_allowlist = []
+            refresh_static_data() # Verifica se precisa recarregar DB
             
-            conn = get_db()
-            if conn:
-                try:
-                    cursor = conn.cursor(dictionary=True)
-                    # Ramais
-                    cursor.execute("SELECT id, description FROM asterisk.devices")
-                    for r in cursor.fetchall(): ramais_db[str(r['id'])] = r['description']
-                    
-                    # Filas
-                    cursor.execute("SELECT extension, descr FROM asterisk.queues_config")
-                    for r in cursor.fetchall(): filas_map[str(r['extension'])] = r['descr']
-
-                    # Troncos
-                    cursor.execute("SELECT name, channelid FROM asterisk.trunks WHERE disabled = 'off'")
-                    for r in cursor.fetchall():
-                        if r['name']: troncos_allowlist.append(str(r['name']).strip().lower())
-                        if r['channelid']: troncos_allowlist.append(str(r['channelid']).strip().lower())
-                    
-                    conn.close()
-                except: pass
-            
+            ramais_db = STATIC_DATA['ramais_db']
             ramais_ids = set(ramais_db.keys())
             ramais_ids.update(['s', 'admin', 'operator'])
 
-            # 2. ARI Requests
+            # ARI Requests (Rápido)
             try:
-                channels = requests.get(f"{ARI_URL}/channels", auth=ARI_AUTH, timeout=2).json()
-                endpoints = requests.get(f"{ARI_URL}/endpoints", auth=ARI_AUTH, timeout=2).json()
+                channels = requests.get(f"{ARI_URL}/channels", auth=ARI_AUTH, timeout=1).json()
+                endpoints = requests.get(f"{ARI_URL}/endpoints", auth=ARI_AUTH, timeout=1).json()
             except:
-                channels = []
-                endpoints = []
+                channels = []; endpoints = []
 
-            # 3. Processamento de Chamadas
+            # --- PROCESSAMENTO ---
             troncos_detalhes = []
             ramais_stats = {} 
             processed_ids = set()
-
-            # Mapa Dialplan (para chamadas saintes)
             map_discado = {}
+
+            # Pré-processamento O(n)
             for ch in channels:
                 linked_id = ch.get('linkedid', ch.get('id'))
                 exten = ch.get('dialplan', {}).get('exten', '')
@@ -158,66 +169,49 @@ def update_loop():
                 linked_id = ch.get('linkedid', ch.get('id'))
                 creation_time = ch.get('creationtime', '')
                 
-                # Limpeza de números
-                c_raw = ch.get('caller', {}).get('number', '')
-                d_raw = ch.get('connected', {}).get('number', '')
-                c_clean = clean_num(c_raw)
-                d_clean = clean_num(d_raw)
+                # Ignora canais irrelevantes para performance
+                if any(x in name.lower() for x in ['rec', 'announc', 'local/', 'snoop']): continue
 
                 # Identifica Recurso
                 match = re.search(r'/(.+?)-', name)
                 res_name = match.group(1) if match else name
                 if '/' in res_name: res_name = res_name.split('/')[1]
                 
-                # --- É CHAMADA DE RAMAL? ---
+                # Ramal
                 if res_name in ramais_ids:
+                    c_clean = clean_num(ch.get('caller', {}).get('number', ''))
+                    d_clean = clean_num(ch.get('connected', {}).get('number', ''))
+                    
                     falando_com = "..."
-                    
-                    # Verifica se é RAMAL x RAMAL
-                    if c_clean in ramais_ids and d_clean in ramais_ids:
-                        # Se eu sou o caller, falo com o connected
-                        if c_clean == res_name: falando_com = "Ramal " + d_clean
-                        else: falando_com = "Ramal " + c_clean
+                    # Lógica simplificada de destino para ramal
+                    discado = map_discado.get(linked_id)
+                    if discado: falando_com = discado
                     else:
-                        # Ramal x Externo
-                        # Tenta pegar do dialplan primeiro
-                        discado = map_discado.get(linked_id)
-                        if discado: falando_com = discado
-                        else:
-                             # Pega o maior número que não seja eu
-                             nums = [x for x in [c_clean, d_clean] if x != res_name and len(x) > 3]
-                             if nums: falando_com = max(nums, key=len)
-                    
+                        nums = [x for x in [c_clean, d_clean] if x != res_name and len(x) > 3]
+                        if nums: falando_com = max(nums, key=len)
+
                     ramais_stats[res_name] = {
                         'status': 'FALANDO' if state == 'Up' else 'CHAMANDO',
                         'with': falando_com,
                         'inicio': creation_time
                     }
                 
-                # --- É TRONCO? ---
+                # Tronco
                 else:
-                    # Filtra lixo
-                    if any(x in name.lower() for x in ['rec', 'announc', 'local/', 'snoop']): continue
-                    
-                    # Se não é ramal e não é lixo, é tronco
                     if linked_id in processed_ids: continue
-                    processed_ids.add(linked_id)
-
-                    destino_final = "---"
                     
-                    # 1. Checa se é Ramal x Ramal (Não deve aparecer em Troncos)
-                    if c_clean in ramais_ids and d_clean in ramais_ids:
-                        continue # Pula, não é tronco
-
-                    # 2. Define Destino Externo
-                    discado = map_discado.get(linked_id)
-                    if discado: 
-                        destino_final = discado
-                    else:
-                        # Pega o número que não é ramal
-                        candidates = [x for x in [c_clean, d_clean] if x and x not in ramais_ids]
-                        if candidates: destino_final = max(candidates, key=len)
-                        else: destino_final = "Externo"
+                    c_clean = clean_num(ch.get('caller', {}).get('number', ''))
+                    d_clean = clean_num(ch.get('connected', {}).get('number', ''))
+                    
+                    # Se for interna entre ramais conhecidos, ignora como tronco
+                    if c_clean in ramais_ids and d_clean in ramais_ids: continue
+                    
+                    processed_ids.add(linked_id)
+                    
+                    destino_final = map_discado.get(linked_id, "Externo")
+                    if destino_final == "Externo":
+                         candidates = [x for x in [c_clean, d_clean] if x and x not in ramais_ids]
+                         if candidates: destino_final = max(candidates, key=len)
 
                     nome_tronco = res_name.upper()
                     if clean_num(nome_tronco) == clean_num(destino_final): nome_tronco = "TRONCO / SAÍDA"
@@ -230,25 +224,23 @@ def update_loop():
                         'inicio': creation_time
                     })
 
-            # 4. Lista de Ramais Final
+            # Montagem Final Ramais
             lista_ramais = []
+            # Transforma lista de endpoints em dict para acesso O(1)
             status_ari = {ep['resource']: 'in_use' if ep.get('channel_ids') else ep['state'] 
                           for ep in endpoints if ep['technology'] in ['PJSIP','SIP']}
 
             for user, desc in ramais_db.items():
                 st_raw = status_ari.get(user, 'offline')
-                active_data = ramais_stats.get(user)
+                active = ramais_stats.get(user)
                 
                 txt = 'OFFLINE'; css = 'st-off'; did = ""; inicio = ""
                 
-                if st_raw == 'online': 
-                    txt = 'LIVRE'; css = 'st-free'
+                if st_raw == 'online': txt, css = 'LIVRE', 'st-free'
                 
-                if active_data:
-                    txt = active_data['status']
-                    css = 'st-busy'
-                    did = active_data['with']
-                    inicio = active_data['inicio']
+                if active:
+                    txt = active['status']; css = 'st-busy'
+                    did = active['with']; inicio = active['inicio']
                 elif st_raw == 'in_use':
                     txt = 'OCUPADO'; css = 'st-busy'
 
@@ -258,20 +250,23 @@ def update_loop():
                     'did': did, 'inicio': inicio
                 })
             
+            # Ordenação leve
             lista_ramais.sort(key=lambda x: int(x['user']) if x['user'].isdigit() else x['user'])
 
-            # 5. Filas (AMI)
-            lista_filas = get_ami_queues(filas_map)
-
+            # Atualiza Cache
             CACHE = {
                 'ramais': lista_ramais,
                 'troncos': {'total': len(troncos_detalhes), 'lista': troncos_detalhes},
-                'filas': lista_filas
+                'filas': get_ami_queues()
             }
-            time.sleep(1)
+            
+            # Sleep dinâmico para manter ~1 segundo de ciclo preciso
+            elapsed = time.time() - loop_start
+            sleep_time = max(0.1, 1.0 - elapsed)
+            time.sleep(sleep_time)
 
         except Exception as e:
-            log(f"Erro: {e}")
+            log(f"Erro Fatal Loop: {e}")
             time.sleep(2)
 
 @app.route('/stats')
@@ -282,4 +277,4 @@ if __name__ == '__main__':
     t = threading.Thread(target=update_loop)
     t.daemon = True
     t.start()
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

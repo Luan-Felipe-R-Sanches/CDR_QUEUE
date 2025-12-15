@@ -1,161 +1,137 @@
 <?php
 // Arquivo: realtime/backend.php
-error_reporting(0); // Silencia erros visuais
+error_reporting(0);
 header('Content-Type: application/json');
-
-// Ajuste o caminho do config se necessário
 require_once '../config.php';
+require_once 'Lib/AsteriskService.php';
 
-// Fallback de segurança se config falhar
-if (!defined('AMI_HOST')) define('AMI_HOST', '127.0.0.1');
-if (!defined('AMI_PORT')) define('AMI_PORT', 5038);
-if (!defined('AMI_USER')) define('AMI_USER', 'php_dashboard');
-if (!defined('AMI_PASS')) define('AMI_PASS', 'senha_segura_ami');
+// Sistema de Cache (2 segundos para não travar o banco/Asterisk)
+$cacheFile = sys_get_temp_dir() . '/ami_queue_cache.json';
+$cacheTime = 2; 
 
-// Função Principal
-function get_queue_data() {
-    $socket = @fsockopen(AMI_HOST, AMI_PORT, $errno, $errstr, 3);
-    if (!$socket) return ['error' => "AMI Offline: $errstr"];
-
-    // 1. Login
-    fputs($socket, "Action: Login\r\nUsername: ".AMI_USER."\r\nSecret: ".AMI_PASS."\r\n\r\n");
-    
-    // Consome resposta do Login
-    $w = 0; 
-    while (!feof($socket) && $w++ < 10) { 
-        $line = fgets($socket, 1024);
-        if (trim($line) == "") break; // Fim do cabeçalho de login
-        if (stripos($line, "Authentication failed") !== false) return ['error' => "Erro de Senha AMI"];
-    }
-
-    // 2. Pede Status das Filas
-    fputs($socket, "Action: QueueStatus\r\n\r\n");
-
-    // 3. Lê até acabar a lista (QueueStatusComplete)
-    $buffer = "";
-    $start = microtime(true);
-    
-    while (!feof($socket)) {
-        $line = fgets($socket, 8192);
-        $buffer .= $line;
-        
-        // Palavra mágica que indica o fim da lista
-        if (stripos($line, "QueueStatusComplete") !== false) break;
-        
-        // Timeout de segurança (3s)
-        if ((microtime(true) - $start) > 3) break;
-    }
-
-    fputs($socket, "Action: Logoff\r\n\r\n");
-    fclose($socket);
-
-    return parse_ami($buffer);
+// Se cache existe e é recente, usa ele
+if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < $cacheTime)) {
+    readfile($cacheFile);
+    exit;
 }
 
-// Parser Inteligente
-function parse_ami($raw) {
+try {
+    $ami = new AsteriskService();
+    // Pede status das filas ao Asterisk
+    $raw = $ami->sendCommand("Action: QueueStatus\r\n\r\n");
+    
+    // Processa os dados cruzando com o Banco de Dados
+    $data = parseAmiOutput($raw);
+    
+    // Salva cache e exibe
+    file_put_contents($cacheFile, json_encode($data));
+    echo json_encode($data);
+
+} catch (Exception $e) {
+    echo json_encode(['error' => $e->getMessage()]);
+}
+
+// --- Funções de Processamento ---
+
+function parseAmiOutput($raw) {
     $lines = explode("\n", $raw);
     $queues = [];
-    $current_evt = [];
+    $current = [];
+    
+    // 1. Busca nomes das Filas (Asterisk)
+    $dbQueueNames = getQueueNamesFromDB();
+    
+    // 2. Busca nomes dos Agentes (Netmaxxi) - AQUI ESTÁ A CORREÇÃO
+    $dbAgentNames = getAgentNamesFromDB();
 
-    // Agrupa linhas em blocos de eventos
-    $events = [];
     foreach ($lines as $line) {
         $line = trim($line);
         if (empty($line)) {
-            if (!empty($current_evt)) {
-                $events[] = $current_evt;
-                $current_evt = [];
-            }
+            if (!empty($current)) processEvent($current, $queues, $dbQueueNames, $dbAgentNames);
+            $current = [];
         } else {
             $parts = explode(': ', $line, 2);
-            if (count($parts) == 2) {
-                $current_evt[$parts[0]] = $parts[1];
-            }
+            if (count($parts) == 2) $current[$parts[0]] = $parts[1];
         }
     }
-
-    // Processa os eventos
-    foreach ($events as $evt) {
-        if (!isset($evt['Event'])) continue;
-        $type = $evt['Event'];
-        $qid = $evt['Queue'] ?? '';
-
-        if ($qid == 'default' || empty($qid)) continue;
-
-        // Cria a fila se não existir
-        if (!isset($queues[$qid])) {
-            $queues[$qid] = [
-                'numero' => $qid,
-                'nome' => "Fila $qid",
-                'logados' => 0, 'espera' => 0, 'atendidas' => 0, 'abandonadas' => 0,
-                'membros' => [], 'chamadas' => []
-            ];
-        }
-
-        // Estatísticas
-        if ($type == 'QueueParams') {
-            $queues[$qid]['logados'] = (int)($evt['LoggedIn'] ?? 0);
-            $queues[$qid]['espera'] = (int)($evt['Callers'] ?? 0);
-            $queues[$qid]['atendidas'] = (int)($evt['Completed'] ?? 0);
-            $queues[$qid]['abandonadas'] = (int)($evt['Abandoned'] ?? 0);
-        }
-        // Membros (Agentes)
-        elseif ($type == 'QueueMember') {
-            $interface = $evt['Name']; // PJSIP/1001
-            $ramal = preg_replace('/[^0-9]/', '', $interface);
-            $nome = $evt['Name']; // Pode ser melhorado buscando do banco
-
-            $queues[$qid]['membros'][] = [
-                'nome' => $nome,
-                'interface' => $interface,
-                'ramal' => $ramal,
-                'status' => (int)$evt['Status'],
-                'paused' => (isset($evt['Paused']) && $evt['Paused'] == '1'),
-                'dynamic' => (stripos($evt['Membership'] ?? '', 'dynamic') !== false)
-            ];
-        }
-        // Chamadas em espera
-        elseif ($type == 'QueueEntry') {
-            $queues[$qid]['chamadas'][] = [
-                'numero' => $evt['CallerIDNum'] ?? 'Desc.',
-                'wait' => ($evt['Wait'] ?? '0') . 's'
-            ];
-        }
-    }
-
-    // Tenta pegar nomes bonitos do banco (Opcional)
-    try {
-        global $pdo; 
-        if(!function_exists('getConexao')) require_once '../config.php';
-        $pdo = getConexao();
-        
-        // Nomes das Filas
-        $stmt = $pdo->query("SELECT extension, descr FROM asterisk.queues_config");
-        while($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            if(isset($queues[$r['extension']])) {
-                $queues[$r['extension']]['nome'] = $r['descr'];
-            }
-        }
-        
-        // Nomes dos Agentes (Opcional - Melhora visual)
-        // Se quiser ver nomes reais, descomente abaixo
-        /*
-        $stmt2 = $pdo->query("SELECT id, description FROM asterisk.devices");
-        $mapaNomes = [];
-        while($r = $stmt2->fetch(PDO::FETCH_ASSOC)) $mapaNomes[$r['id']] = $r['description'];
-        
-        foreach($queues as &$q) {
-            foreach($q['membros'] as &$m) {
-                if(isset($mapaNomes[$m['ramal']])) $m['nome'] = $mapaNomes[$m['ramal']];
-            }
-        }
-        */
-
-    } catch(Exception $e) {}
+    // Processa último bloco
+    if (!empty($current)) processEvent($current, $queues, $dbQueueNames, $dbAgentNames);
 
     return ['filas' => array_values($queues)];
 }
 
-echo json_encode(get_queue_data());
+function processEvent($evt, &$queues, $queueMap, $agentMap) {
+    if (!isset($evt['Event'])) return;
+    $type = $evt['Event'];
+    $qid = $evt['Queue'] ?? '';
+
+    if (empty($qid) || $qid == 'default') return;
+
+    // Cria a fila se não existir
+    if (!isset($queues[$qid])) {
+        $queues[$qid] = [
+            'numero' => $qid,
+            'nome' => $queueMap[$qid] ?? "Fila $qid",
+            'atendidas' => 0, 'abandonadas' => 0, 'logados' => 0, 'espera' => 0,
+            'membros' => [], 'chamadas' => []
+        ];
+    }
+
+    // Estatísticas da Fila
+    if ($type == 'QueueParams') {
+        $queues[$qid]['logados'] = (int)($evt['LoggedIn']??0);
+        $queues[$qid]['espera'] = (int)($evt['Callers']??0);
+        $queues[$qid]['atendidas'] = (int)($evt['Completed']??0);
+        $queues[$qid]['abandonadas'] = (int)($evt['Abandoned']??0);
+    } 
+    // Membros (Agentes)
+    elseif ($type == 'QueueMember') {
+        $iface = $evt['Name']; // Vem como PJSIP/9002
+        
+        // Extrai apenas o número do ramal (remove PJSIP/)
+        // Ex: PJSIP/9002 vira 9002
+        $ramal = preg_replace('/^[A-Za-z0-9]+\//', '', $iface); 
+        
+        // Verifica se tem nome no banco, senão usa o ramal mesmo
+        $nomeBonito = isset($agentMap[$ramal]) ? $agentMap[$ramal] : $ramal;
+
+        $queues[$qid]['membros'][] = [
+            'nome' => $nomeBonito, // Agora mostra "Camila", "Luan", etc.
+            'interface' => $iface,
+            'ramal' => $ramal,
+            'status' => (int)$evt['Status'],
+            'paused' => (isset($evt['Paused']) && $evt['Paused'] == '1'),
+            'dynamic' => stripos($evt['Membership']??'', 'dynamic') !== false
+        ];
+    } 
+    // Chamadas na Espera
+    elseif ($type == 'QueueEntry') {
+        $queues[$qid]['chamadas'][] = [
+            'numero' => $evt['CallerIDNum'] ?? 'Desc.',
+            'wait' => ($evt['Wait'] ?? '0') . 's'
+        ];
+    }
+}
+
+// Busca Nomes das Filas
+function getQueueNamesFromDB() {
+    try {
+        $pdo = getConexao();
+        // Ajuste aqui se sua tabela de filas tiver outro nome
+        $stmt = $pdo->query("SELECT extension, descr FROM asterisk.queues_config");
+        return $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+    } catch (Exception $e) { return []; }
+}
+
+// NOVA FUNÇÃO: Busca Nomes dos Agentes
+function getAgentNamesFromDB() {
+    try {
+        $pdo = getConexao();
+        // FETCH_KEY_PAIR cria um array onde a chave é 'username' e valor é 'name'
+        // Ex: ['9002' => 'Camila', '9034' => 'Luan Felipe']
+        $sql = "SELECT username, name FROM netmaxxi_callcenter.users";
+        $stmt = $pdo->query($sql);
+        return $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+    } catch (Exception $e) { return []; }
+}
 ?>
