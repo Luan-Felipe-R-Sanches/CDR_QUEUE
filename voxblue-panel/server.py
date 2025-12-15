@@ -5,6 +5,7 @@ import requests
 import mysql.connector
 import re
 import socket
+from datetime import datetime
 from flask import Flask, jsonify
 from flask_cors import CORS
 
@@ -12,15 +13,15 @@ from flask_cors import CORS
 DB_CONFIG = {
     'host': 'localhost',
     'user': 'root',
-    'password': 'n3tware385br', # <--- SUA SENHA MYSQL
+    'password': 'n3tware385br', 
     'database': 'netmaxxi_callcenter'
 }
 
-# ARI
+# ARI (Para Canais e Ramais)
 ARI_URL = "http://127.0.0.1:8088/ari"
 ARI_AUTH = ('admin', 'n3tware385br')
 
-# AMI
+# AMI (Para Filas)
 AMI_HOST = '127.0.0.1'
 AMI_PORT = 5038
 AMI_USER = 'php_dashboard'
@@ -32,15 +33,21 @@ CORS(app)
 CACHE = {
     'ramais': [],
     'troncos': {'total': 0, 'lista': []},
-    'filas': [],
-    'timestamp': 0
+    'filas': []
 }
 
-# --- FUNÇÃO: LOG NO TERMINAL ---
 def log(msg):
-    print(f"[VoxBlue] {msg}")
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
-# --- FUNÇÃO: CONSULTA AMI NATIVA (FILAS) ---
+def get_db():
+    try: return mysql.connector.connect(**DB_CONFIG)
+    except: return None
+
+def clean_num(val):
+    if not val: return ""
+    return ''.join(filter(str.isdigit, str(val)))
+
+# --- FUNÇÃO DE FILAS (AMI) RESTAURADA ---
 def get_ami_queues(nomes_filas):
     filas_data = []
     sock = None
@@ -58,8 +65,7 @@ def get_ami_queues(nomes_filas):
         while time.time() - start < 2:
             chunk = sock.recv(4096)
             buffer += chunk
-            if b"EventList: Complete" in buffer or b"Authentication failed" in buffer:
-                break
+            if b"EventList: Complete" in buffer: break
         
         sock.sendall(b"Action: Logoff\r\n\r\n")
         sock.close()
@@ -82,198 +88,198 @@ def get_ami_queues(nomes_filas):
                     'nome': nomes_filas.get(q_num, f"Fila {q_num}"),
                     'logados': data.get('LoggedIn', '0'),
                     'espera': data.get('Callers', '0'),
-                    'tma': data.get('HoldTime', '0')
+                    'tma': data.get('HoldTime', '0'),
+                    'abandonadas': data.get('Abandoned', '0'),
+                    'completo': data.get('Completed', '0')
                 })
-                
-    except Exception as e:
-        # Silencioso para não poluir terminal se AMI cair
+    except:
         pass
-        
     return filas_data
 
-def get_db():
-    try:
-        return mysql.connector.connect(**DB_CONFIG)
-    except Exception as e:
-        log(f"Erro Conexão Banco: {e}")
-        return None
-
-# --- WORKER ---
 def update_loop():
     global CACHE
-    log("Iniciando Loop de Monitoramento...")
+    log("Servidor V9: Full Stack (Ramais + Filas + Troncos + Internas)...")
     
     while True:
         try:
-            conn = get_db()
-            if not conn:
-                time.sleep(5)
-                continue
-
-            cursor = conn.cursor(dictionary=True)
-            
-            # 1. Carregar Ramais
-            cursor.execute("SELECT id, description FROM asterisk.devices")
-            ramais_db = {str(r['id']): r['description'] for r in cursor.fetchall()}
-            
-            # 2. Carregar Troncos (CRÍTICO: Lista de nomes permitidos)
-            cursor.execute("SELECT name, channelid FROM asterisk.trunks WHERE disabled = 'off'")
+            # 1. Carrega Dados do Banco
+            ramais_db = {}
+            filas_map = {}
             troncos_allowlist = []
-            for r in cursor.fetchall():
-                if r['name']: troncos_allowlist.append(str(r['name']).strip())
-                if r['channelid']: troncos_allowlist.append(str(r['channelid']).strip())
             
-            # Remove duplicados
-            troncos_allowlist = list(set(troncos_allowlist))
-            
-            # 3. Carregar Filas
-            cursor.execute("SELECT extension, descr FROM asterisk.queues_config")
-            filas_map = {str(r['extension']): r['descr'] for r in cursor.fetchall()}
-            
-            conn.close()
+            conn = get_db()
+            if conn:
+                try:
+                    cursor = conn.cursor(dictionary=True)
+                    # Ramais
+                    cursor.execute("SELECT id, description FROM asterisk.devices")
+                    for r in cursor.fetchall(): ramais_db[str(r['id'])] = r['description']
+                    
+                    # Filas
+                    cursor.execute("SELECT extension, descr FROM asterisk.queues_config")
+                    for r in cursor.fetchall(): filas_map[str(r['extension'])] = r['descr']
 
-            # 4. ARI Requests
+                    # Troncos
+                    cursor.execute("SELECT name, channelid FROM asterisk.trunks WHERE disabled = 'off'")
+                    for r in cursor.fetchall():
+                        if r['name']: troncos_allowlist.append(str(r['name']).strip().lower())
+                        if r['channelid']: troncos_allowlist.append(str(r['channelid']).strip().lower())
+                    
+                    conn.close()
+                except: pass
+            
+            ramais_ids = set(ramais_db.keys())
+            ramais_ids.update(['s', 'admin', 'operator'])
+
+            # 2. ARI Requests
             try:
-                ch_req = requests.get(f"{ARI_URL}/channels", auth=ARI_AUTH, timeout=2)
-                channels = ch_req.json()
-                ep_req = requests.get(f"{ARI_URL}/endpoints", auth=ARI_AUTH, timeout=2)
-                endpoints = ep_req.json()
+                channels = requests.get(f"{ARI_URL}/channels", auth=ARI_AUTH, timeout=2).json()
+                endpoints = requests.get(f"{ARI_URL}/endpoints", auth=ARI_AUTH, timeout=2).json()
             except:
                 channels = []
                 endpoints = []
 
-            # 5. Processamento
+            # 3. Processamento de Chamadas
             troncos_detalhes = []
-            mapa_dids = {}
+            ramais_stats = {} 
+            processed_ids = set()
 
-            # DEBUG: Mostra o que veio do ARI se tiver canal ativo
-            if len(channels) > 0:
-                # log(f"Canais Ativos: {len(channels)}")
-                pass
+            # Mapa Dialplan (para chamadas saintes)
+            map_discado = {}
+            for ch in channels:
+                linked_id = ch.get('linkedid', ch.get('id'))
+                exten = ch.get('dialplan', {}).get('exten', '')
+                if exten and exten not in ['s', 'h'] and len(exten) > 3:
+                    map_discado[linked_id] = exten
 
             for ch in channels:
-                name = ch.get('name', '') # Ex: PJSIP/22222122-00003
+                name = ch.get('name', '')
                 state = ch.get('state', '')
-                caller_num = ch.get('caller', {}).get('number', '')
-                connected_num = ch.get('connected', {}).get('number', '')
+                linked_id = ch.get('linkedid', ch.get('id'))
+                creation_time = ch.get('creationtime', '')
+                
+                # Limpeza de números
+                c_raw = ch.get('caller', {}).get('number', '')
+                d_raw = ch.get('connected', {}).get('number', '')
+                c_clean = clean_num(c_raw)
+                d_clean = clean_num(d_raw)
 
-                # --- LÓGICA DE TRONCO MELHORADA ---
-                is_tronco = False
+                # Identifica Recurso
+                match = re.search(r'/(.+?)-', name)
+                res_name = match.group(1) if match else name
+                if '/' in res_name: res_name = res_name.split('/')[1]
                 
-                # Tenta extrair o "recurso" do canal. Ex: de PJSIP/2222-01 pega "2222"
-                # Regex: Pega tudo entre a primeira barra / e o ultimo traço -
-                match_resource = re.search(r'/(.+)-', name)
-                
-                if match_resource:
-                    resource_name = match_resource.group(1) # Ex: 22222122
+                # --- É CHAMADA DE RAMAL? ---
+                if res_name in ramais_ids:
+                    falando_com = "..."
                     
-                    # Verifica se esse recurso está na nossa lista do banco
-                    if resource_name in troncos_allowlist:
-                        is_tronco = True
+                    # Verifica se é RAMAL x RAMAL
+                    if c_clean in ramais_ids and d_clean in ramais_ids:
+                        # Se eu sou o caller, falo com o connected
+                        if c_clean == res_name: falando_com = "Ramal " + d_clean
+                        else: falando_com = "Ramal " + c_clean
                     else:
-                        # Backup: Procura substring (para casos como PJSIP/TroncoVivo/1199...)
-                        for t in troncos_allowlist:
-                            if t in name:
-                                is_tronco = True
-                                break
+                        # Ramal x Externo
+                        # Tenta pegar do dialplan primeiro
+                        discado = map_discado.get(linked_id)
+                        if discado: falando_com = discado
+                        else:
+                             # Pega o maior número que não seja eu
+                             nums = [x for x in [c_clean, d_clean] if x != res_name and len(x) > 3]
+                             if nums: falando_com = max(nums, key=len)
+                    
+                    ramais_stats[res_name] = {
+                        'status': 'FALANDO' if state == 'Up' else 'CHAMANDO',
+                        'with': falando_com,
+                        'inicio': creation_time
+                    }
                 
-                if is_tronco:
-                    # Descobrir quem está usando (Ramal ou Destino)
-                    uso = "Conectando..."
-                    if len(caller_num) < 6 and caller_num != "": uso = f"Ramal {caller_num}"
-                    elif len(connected_num) < 6 and connected_num != "": uso = f"Ramal {connected_num}"
+                # --- É TRONCO? ---
+                else:
+                    # Filtra lixo
+                    if any(x in name.lower() for x in ['rec', 'announc', 'local/', 'snoop']): continue
+                    
+                    # Se não é ramal e não é lixo, é tronco
+                    if linked_id in processed_ids: continue
+                    processed_ids.add(linked_id)
+
+                    destino_final = "---"
+                    
+                    # 1. Checa se é Ramal x Ramal (Não deve aparecer em Troncos)
+                    if c_clean in ramais_ids and d_clean in ramais_ids:
+                        continue # Pula, não é tronco
+
+                    # 2. Define Destino Externo
+                    discado = map_discado.get(linked_id)
+                    if discado: 
+                        destino_final = discado
                     else:
-                        # Se for chamada sainte, pega o numero longo
-                        if len(connected_num) > 6: uso = f"L: {connected_num}"
-                        elif len(caller_num) > 6: uso = f"R: {caller_num}"
+                        # Pega o número que não é ramal
+                        candidates = [x for x in [c_clean, d_clean] if x and x not in ramais_ids]
+                        if candidates: destino_final = max(candidates, key=len)
+                        else: destino_final = "Externo"
+
+                    nome_tronco = res_name.upper()
+                    if clean_num(nome_tronco) == clean_num(destino_final): nome_tronco = "TRONCO / SAÍDA"
 
                     troncos_detalhes.append({
-                        'nome': resource_name if match_resource else name,
+                        'nome': nome_tronco,
                         'canal': name,
                         'status': state,
-                        'uso': uso
+                        'destino': destino_final,
+                        'inicio': creation_time
                     })
-                
-                # --- LÓGICA DE DID (RAMAIS) ---
-                # Se não é tronco, deve ser ramal
-                if not is_tronco:
-                    match_ramal = re.search(r'/(?P<ramal>\d+)-', name)
-                    if match_ramal:
-                        ramal = match_ramal.group('ramal')
-                        did = ''
-                        # Prioridade para achar o numero externo
-                        if connected_num and len(connected_num) > 5: did = connected_num
-                        elif caller_num and len(caller_num) > 5: did = caller_num
-                        
-                        if did: mapa_dids[ramal] = did
 
-            # 6. Monta Lista de Ramais
+            # 4. Lista de Ramais Final
             lista_ramais = []
-            status_ari = {}
-            
-            # Mapeia endpoints ARI
-            for ep in endpoints:
-                if ep['technology'] in ['PJSIP', 'SIP', 'IAX2']:
-                    res = ep['resource']
-                    st = ep['state']
-                    if len(ep.get('channel_ids', [])) > 0: st = 'in_use'
-                    status_ari[res] = st
+            status_ari = {ep['resource']: 'in_use' if ep.get('channel_ids') else ep['state'] 
+                          for ep in endpoints if ep['technology'] in ['PJSIP','SIP']}
 
-            for user, nome_desc in ramais_db.items():
-                raw_state = status_ari.get(user, 'offline')
-                did_val = mapa_dids.get(user, '')
+            for user, desc in ramais_db.items():
+                st_raw = status_ari.get(user, 'offline')
+                active_data = ramais_stats.get(user)
                 
-                st_text = 'OFFLINE'; css = 'st-off'
+                txt = 'OFFLINE'; css = 'st-off'; did = ""; inicio = ""
                 
-                if raw_state == 'online': 
-                    st_text = 'LIVRE'; css = 'st-free'
-                elif raw_state == 'in_use': 
-                    st_text = 'FALANDO'; css = 'st-busy'
-                    if not did_val: did_val = "Em Linha"
+                if st_raw == 'online': 
+                    txt = 'LIVRE'; css = 'st-free'
                 
-                if did_val:
-                    st_text = 'FALANDO'; css = 'st-busy'
+                if active_data:
+                    txt = active_data['status']
+                    css = 'st-busy'
+                    did = active_data['with']
+                    inicio = active_data['inicio']
+                elif st_raw == 'in_use':
+                    txt = 'OCUPADO'; css = 'st-busy'
 
                 lista_ramais.append({
-                    'user': user,
-                    'nome': nome_desc,
-                    'status_text': st_text,
-                    'css_class': css,
-                    'did': did_val
+                    'user': user, 'nome': desc,
+                    'status': txt, 'css_class': css,
+                    'did': did, 'inicio': inicio
                 })
             
             lista_ramais.sort(key=lambda x: int(x['user']) if x['user'].isdigit() else x['user'])
 
-            # 7. Filas via AMI
+            # 5. Filas (AMI)
             lista_filas = get_ami_queues(filas_map)
 
-            # ATUALIZA CACHE
             CACHE = {
                 'ramais': lista_ramais,
                 'troncos': {'total': len(troncos_detalhes), 'lista': troncos_detalhes},
                 'filas': lista_filas
             }
-            
             time.sleep(1)
 
         except Exception as e:
-            log(f"ERRO FATAL NO LOOP: {e}")
-            time.sleep(5)
+            log(f"Erro: {e}")
+            time.sleep(2)
 
 @app.route('/stats')
 def stats():
     return jsonify(CACHE)
 
 if __name__ == '__main__':
-    print("------------------------------------------------")
-    print("VOXBLUE PYTHON SERVER INICIADO")
-    print(f"Banco: {DB_CONFIG['host']}")
-    print(f"ARI: {ARI_URL}")
-    print("Aguardando dados...")
-    print("------------------------------------------------")
-    
     t = threading.Thread(target=update_loop)
     t.daemon = True
     t.start()
-    
     app.run(host='0.0.0.0', port=5000, debug=False)
