@@ -365,7 +365,7 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
         </div>
         <div class="d-flex gap-3 align-items-center">
             <div id="clock" class="font-monospace text-info fw-bold">--:--:--</div>
-            <a href="../logout.php" class="btn btn-outline-secondary btn-sm px-3 fw-bold">SAIR</a>
+            <a href="../app.php" class="btn btn-outline-secondary btn-sm px-3 fw-bold">SAIR</a>
         </div>
     </nav>
 
