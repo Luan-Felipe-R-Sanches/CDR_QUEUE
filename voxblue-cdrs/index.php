@@ -207,7 +207,7 @@
             Este módulo está sendo desenvolvido com as melhores tecnologias para otimizar sua operação.
         </p>
 
-        <a href="../../portal.php" class="btn-back">
+        <a href="../" class="btn-back">
             <i class="bi bi-arrow-left"></i> Voltar ao Portal
         </a>
     </div>

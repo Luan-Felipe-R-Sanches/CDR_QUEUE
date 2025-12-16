@@ -1,211 +1,275 @@
 <?php
-// Arquivo: login.php
-require 'db.php';
+// Arquivo: voxblue-agente/login.php
+session_start();
+
+// Verifica se o arquivo de conexão existe para evitar Erro 500 silencioso
+if (!file_exists('db.php')) {
+    die("Erro Crítico: Arquivo db.php não encontrado na pasta voxblue-agente.");
+}
+require_once 'db.php';
+
+// Se já logado, redireciona
+if (isset($_SESSION['user_id'])) {
+    header('Location: index.php');
+    exit;
+}
 
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $user = $_POST['username'];
-    $pass = $_POST['password'];
+    $user = trim($_POST['username'] ?? '');
+    $pass = trim($_POST['password'] ?? '');
 
-    // Previne SQL Injection básico se o driver não estiver configurado para emular prepares
-    $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
-    $stmt->execute([$user]);
-    $data = $stmt->fetch(PDO::FETCH_ASSOC);
+    try {
+        // Query segura buscando na tabela do call center
+        // Removemos "active='Y'" preventivamente caso a coluna não exista
+        $sql = "SELECT id, username, password, name, role, tech 
+                FROM netmaxxi_callcenter.users 
+                WHERE username = :u LIMIT 1";
+        
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(['u' => $user]);
+        $data = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if ($data && password_verify($pass, $data['password'])) {
-        $_SESSION['user_id'] = $data['id'];
-        $_SESSION['user_name'] = $data['username'];
-        $_SESSION['user_realname'] = $data['name'];
-        $_SESSION['user_role'] = $data['role'];
-        $_SESSION['user_tech'] = $data['tech'];
+        if ($data) {
+            // Verifica senha (hash ou texto plano)
+            $senhaValida = password_verify($pass, $data['password']);
+            if (!$senhaValida && $data['password'] === $pass) {
+                $senhaValida = true; // Fallback legado
+            }
 
-        // REGRA DE NEGÓCIO: Redirecionamento baseado no cargo
-        if ($data['role'] === 'admin') {
-            header('Location: admin.php');
-        } else {
-            header('Location: index.php');
+            if ($senhaValida) {
+                session_regenerate_id(true);
+                $_SESSION['user_id'] = $data['id'];
+                $_SESSION['user_name'] = $data['username'];
+                $_SESSION['user_realname'] = $data['name'];
+                $_SESSION['user_role'] = $data['role'];
+                $_SESSION['user_tech'] = $data['tech'];
+
+                // Redireciona baseado no cargo
+                if ($data['role'] === 'admin') {
+                    header('Location: admin.php');
+                } else {
+                    header('Location: index.php');
+                }
+                exit;
+            }
         }
-        exit;
-    } else {
         $error = "Credenciais inválidas.";
+    } catch (PDOException $e) {
+        $error = "Erro no sistema: " . $e->getMessage();
     }
 }
 ?>
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Acesso VoxBlue</title>
+    <title>Agent Workspace | VoxBlue</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
 
     <style>
         :root {
-            --bg-dark: #020617;
-            --accent: #06b6d4; /* Ciano Neon */
-            --accent-hover: #22d3ee;
-            --text-white: #f8fafc;
-            --glass-border: rgba(255, 255, 255, 0.1);
+            --bg-deep: #030712;
+            --glass-bg: rgba(10, 20, 30, 0.7);
+            --glass-border: rgba(6, 182, 212, 0.2);
+            --neon-cyan: #06b6d4;
+            --neon-glow: rgba(6, 182, 212, 0.4);
+            --text-main: #ecfeff;
         }
 
         body {
+            background-color: var(--bg-deep);
+            color: var(--text-main);
             font-family: 'Inter', sans-serif;
-            background: linear-gradient(135deg, #020617 0%, #1e293b 50%, #0f172a 100%);
-            background-size: 400% 400%;
-            animation: gradientBG 15s ease infinite;
-            min-height: 100vh;
-            display: flex; align-items: center; justify-content: center;
-            margin: 0; color: var(--text-white);
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            margin: 0;
+            perspective: 1000px;
         }
 
-        @keyframes gradientBG {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
+        /* --- Grid Animation (Igual ao Index) --- */
+        .cyber-grid {
+            position: absolute;
+            width: 200%; height: 200%;
+            bottom: -50%; left: -50%;
+            background-image: 
+                linear-gradient(rgba(6, 182, 212, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(6, 182, 212, 0.1) 1px, transparent 1px);
+            background-size: 50px 50px;
+            transform: perspective(500px) rotateX(60deg);
+            animation: moveGrid 10s linear infinite;
+            z-index: -1;
+            mask-image: linear-gradient(to top, rgba(0,0,0,1) 0%, transparent 60%);
+            -webkit-mask-image: linear-gradient(to top, rgba(0,0,0,1) 0%, transparent 60%);
         }
+        @keyframes moveGrid { 0% { transform: perspective(500px) rotateX(60deg) translateY(0); } 100% { transform: perspective(500px) rotateX(60deg) translateY(50px); } }
 
-        .login-wrapper { width: 100%; max-width: 450px; padding: 20px; }
-
-        .card {
-            background: rgba(30, 41, 59, 0.6); /* Transparência Dark */
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid var(--glass-border);
-            border-radius: 24px;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+        /* --- Cartão de Login --- */
+        .login-card {
+            width: 100%;
+            max-width: 400px;
             padding: 40px;
-        }
-
-        /* Ícone da Marca com Glow */
-        .brand-icon {
-            width: 70px; height: 70px;
-            background: linear-gradient(135deg, var(--accent), #3b82f6);
-            border-radius: 20px;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 32px; color: white;
-            margin: 0 auto 20px;
-            box-shadow: 0 0 25px rgba(6, 182, 212, 0.4);
-        }
-
-        h3 { font-family: 'Rajdhani', sans-serif; font-weight: 700; letter-spacing: 1px; margin-bottom: 5px; color: #fff; }
-        p.subtitle { color: #cbd5e1; font-size: 0.95rem; margin-bottom: 30px; font-weight: 300; }
-
-        /* INPUTS FLUTUANTES DARK (Estilo Cyberpunk) */
-        .form-floating > .form-control {
-            background: rgba(15, 23, 42, 0.6);
+            background: var(--glass-bg);
             border: 1px solid var(--glass-border);
-            color: #fff !important;
-            border-radius: 12px;
-            height: 55px;
+            border-radius: 20px;
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            box-shadow: 0 0 40px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.05);
+            animation: floatUp 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
         }
-        
-        .form-floating > .form-control:focus {
-            background: rgba(15, 23, 42, 0.9);
-            border-color: var(--accent);
-            box-shadow: 0 0 0 4px rgba(6, 182, 212, 0.2);
+
+        @keyframes floatUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Header */
+        .brand-header { text-align: center; margin-bottom: 30px; }
+        .icon-box {
+            width: 70px; height: 70px;
+            margin: 0 auto 15px;
+            background: rgba(6, 182, 212, 0.1);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 2rem; color: var(--neon-cyan);
+            box-shadow: 0 0 20px var(--neon-glow);
+        }
+        .brand-title {
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 700; font-size: 1.8rem;
+            letter-spacing: 2px; margin: 0;
+            text-transform: uppercase;
+        }
+        .brand-subtitle { font-size: 0.8rem; color: #67e8f9; opacity: 0.7; letter-spacing: 1px; }
+
+        /* Inputs */
+        .input-group-custom { margin-bottom: 20px; position: relative; }
+        .form-control {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
             color: #fff;
+            padding: 12px 15px 12px 45px;
+            font-size: 0.95rem;
+            transition: 0.3s;
         }
-
-        .form-floating > label { color: #94a3b8; }
-        .form-floating > .form-control:focus ~ label,
-        .form-floating > .form-control:not(:placeholder-shown) ~ label {
-            color: var(--accent);
-            font-weight: 600;
+        .form-control:focus {
+            background: rgba(0, 0, 0, 0.5);
+            border-color: var(--neon-cyan);
+            box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
+            color: #fff;
+            outline: none;
         }
-
-        /* Correção do Autocomplete Branco do Chrome */
+        .input-icon {
+            position: absolute; left: 15px; top: 50%;
+            transform: translateY(-50%);
+            color: var(--neon-cyan);
+            z-index: 10;
+        }
         input:-webkit-autofill,
         input:-webkit-autofill:hover, 
         input:-webkit-autofill:focus, 
         input:-webkit-autofill:active{
-            -webkit-box-shadow: 0 0 0 30px #0f172a inset !important;
+            -webkit-box-shadow: 0 0 0 30px #050b14 inset !important;
             -webkit-text-fill-color: white !important;
             transition: background-color 5000s ease-in-out 0s;
         }
 
-        /* Botão Principal Neon */
-        .btn-login {
-            background: linear-gradient(90deg, var(--accent), #3b82f6);
-            border: none; height: 55px;
+        /* Botão */
+        .btn-enter {
+            width: 100%;
+            padding: 12px;
+            border-radius: 10px;
+            border: none;
+            background: linear-gradient(135deg, #0891b2, #06b6d4);
+            color: white;
             font-family: 'Rajdhani', sans-serif;
-            font-weight: 700; font-size: 1.1rem; letter-spacing: 1px;
-            border-radius: 12px; margin-top: 15px;
-            color: #fff;
-            transition: all 0.3s;
-            box-shadow: 0 4px 15px rgba(6, 182, 212, 0.3);
+            font-weight: 700;
+            font-size: 1.1rem;
+            letter-spacing: 1px;
+            margin-top: 10px;
+            transition: 0.3s;
+            text-transform: uppercase;
         }
-        .btn-login:hover {
+        .btn-enter:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(6, 182, 212, 0.5);
-            background: linear-gradient(90deg, #22d3ee, #60a5fa);
-            color: #fff;
+            box-shadow: 0 5px 20px rgba(6, 182, 212, 0.4);
+            background: linear-gradient(135deg, #06b6d4, #22d3ee);
         }
 
-        /* Alert de Erro */
-        .alert-custom {
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.3);
-            color: #fca5a5;
-            font-size: 0.9rem; border-radius: 10px;
-        }
-
-        /* Link Voltar */
+        /* Botão Voltar */
         .btn-back {
-            display: block; text-align: center; margin-top: 25px;
-            color: #94a3b8; text-decoration: none;
-            font-size: 0.9rem; transition: all 0.3s;
+            display: flex; align-items: center; justify-content: center;
+            margin-top: 25px;
+            color: #64748b;
+            text-decoration: none;
+            font-size: 0.85rem;
+            transition: 0.3s;
+            border-top: 1px solid rgba(255,255,255,0.05);
+            padding-top: 20px;
         }
-        .btn-back:hover { color: var(--accent); transform: translateX(-3px); }
+        .btn-back:hover { color: var(--neon-cyan); }
+        .btn-back i { margin-right: 8px; transition: 0.3s; }
+        .btn-back:hover i { transform: translateX(-3px); }
 
-        .footer-copy { color: #64748b; font-size: 0.8rem; margin-top: 30px; opacity: 0.7; }
+        .alert-error {
+            background: rgba(220, 38, 38, 0.15);
+            border: 1px solid rgba(220, 38, 38, 0.4);
+            color: #fca5a5;
+            font-size: 0.85rem;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 20px;
+            display: flex; align-items: center; gap: 10px;
+        }
     </style>
 </head>
 <body>
 
-    <div class="login-wrapper">
-        <div class="card">
-            <div class="text-center">
-                <div class="brand-icon">
-                    <i class="bi bi-headset"></i>
-                </div>
-                <h3>VOXBLUE AGENTES</h3>
-                <p class="subtitle">Acesse o seu workspace</p>
+    <div class="cyber-grid"></div>
+
+    <div class="login-card">
+        <div class="brand-header">
+            <div class="icon-box">
+                <i class="bi bi-headset"></i>
             </div>
-
-            <?php if ($error): ?>
-                <div class="alert alert-custom p-3 mb-4 d-flex align-items-center animate__animated animate__shakeX">
-                    <i class="bi bi-exclamation-triangle-fill me-2"></i> <?= $error ?>
-                </div>
-            <?php endif; ?>
-
-            <form method="POST">
-                <div class="form-floating mb-3">
-                    <input type="text" name="username" class="form-control" id="floatingInput" placeholder="Usuário" required autofocus autocomplete="off">
-                    <label for="floatingInput"><i class="bi bi-person me-1"></i> Usuário</label>
-                </div>
-                
-                <div class="form-floating mb-4">
-                    <input type="password" name="password" class="form-control" id="floatingPassword" placeholder="Senha" required>
-                    <label for="floatingPassword"><i class="bi bi-lock me-1"></i> Senha</label>
-                </div>
-
-                <button type="submit" class="btn btn-primary w-100 btn-login">
-                    ENTRAR <i class="bi bi-arrow-right-short ms-1" style="font-size: 1.2rem; vertical-align: middle;"></i>
-                </button>
-            </form>
-
-            <a href="../../portal.php" class="btn-back">
-                <i class="bi bi-arrow-left me-1"></i> Voltar ao Portal
-            </a>
-
-            <div class="text-center footer-copy">
-                &copy; <?= date('Y') ?> VoxBlue Solutions
-            </div>
+            <h1 class="brand-title">AGENTE</h1>
+            <div class="brand-subtitle">VOXBLUE WORKSPACE</div>
         </div>
+
+        <?php if ($error): ?>
+            <div class="alert-error animate__animated animate__shakeX">
+                <i class="bi bi-exclamation-octagon-fill"></i>
+                <span><?= htmlspecialchars($error) ?></span>
+            </div>
+        <?php endif; ?>
+
+        <form method="POST">
+            <div class="input-group-custom">
+                <i class="bi bi-person-fill input-icon"></i>
+                <input type="text" name="username" class="form-control" placeholder="ID do Agente" required autofocus autocomplete="username">
+            </div>
+
+            <div class="input-group-custom">
+                <i class="bi bi-lock-fill input-icon"></i>
+                <input type="password" name="password" class="form-control" placeholder="Senha de Acesso" required autocomplete="current-password">
+            </div>
+
+            <button type="submit" class="btn-enter">
+                Conectar <i class="bi bi-chevron-right ms-1" style="font-size: 0.9em;"></i>
+            </button>
+        </form>
+
+        <a href="../index.php" class="btn-back">
+            <i class="bi bi-arrow-left"></i> Voltar à Tela Inicial
+        </a>
     </div>
 
 </body>

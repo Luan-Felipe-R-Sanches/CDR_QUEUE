@@ -1,9 +1,12 @@
 <?php
-// Arquivo: /var/www/html/config_global.php
-session_start();
+// Arquivo: config_global.php
+// ATENÇÃO: Não deixe espaço em branco antes do <?php
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
-// Configurações do Banco
-define('DB_HOST', '127.0.0.1'); // Ajuste se necessário
+// Configurações do Banco (VERIFIQUE SE ESTÃO CERTAS)
+define('DB_HOST', '127.0.0.1'); 
 define('DB_USER', 'root');
 define('DB_PASS', 'n3tware385br');
 define('DB_NAME', 'netmaxxi_callcenter');
@@ -17,14 +20,18 @@ function getGlobalConnection() {
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         return $pdo;
     } catch (PDOException $e) {
-        die("Erro de conexão global: " . $e->getMessage());
+        // Se der erro aqui, vai aparecer na tela agora
+        die("Erro fatal de conexão com o banco: " . $e->getMessage());
     }
 }
 
-// Função para verificar se está logado
+// Função de verificação de login
 function checkGlobalAuth() {
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
     if (!isset($_SESSION['vox_user']) || empty($_SESSION['vox_user'])) {
-        header('Location: /login.php');
+        header('Location: login.php');
         exit;
     }
 }

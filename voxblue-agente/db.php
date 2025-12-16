@@ -1,30 +1,48 @@
 <?php
-// Arquivo: db.php
+// Arquivo: voxblue-agente/db.php
 
-// Só inicia a sessão se ela NÃO estiver ativa
+// 1. Inicia Sessão se não existir
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// Usa require_once para garantir que o config não cause conflito
-$config = require_once __DIR__ . '/config.php';
+// 2. Configurações de Banco de Dados
+define('DB_HOST', '127.0.0.1');
+define('DB_USER', 'root');
+define('DB_PASS', 'n3tware385br');
+define('DB_NAME', 'netmaxxi_callcenter');
 
+// 3. Conexão PDO
 try {
-    $pdo = new PDO(
-        "mysql:host={$config['db']['host']};dbname={$config['db']['dbname']};charset=utf8",
-        $config['db']['user'],
-        $config['db']['pass']
-    );
+    $pdo = new PDO("mysql:host=".DB_HOST.";dbname=".DB_NAME.";charset=utf8mb4", DB_USER, DB_PASS);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
-    // Em produção, não mostre o erro completo na tela, apenas log
-    die("Erro de conexão com o banco de dados.");
+    // Se falhar, mostra erro amigável (evita tela branca)
+    die("<h3>Erro Crítico</h3><p>Não foi possível conectar ao banco de dados: " . $e->getMessage() . "</p>");
 }
 
-// Funções auxiliares mantidas
+// 4. Função de Verificação de Admin
+function checkAdmin() {
+    // Verifica se está logado
+    if (!isset($_SESSION['user_id'])) {
+        header('Location: login.php');
+        exit;
+    }
+    
+    // Verifica se é admin
+    if (($_SESSION['user_role'] ?? '') !== 'admin') {
+        // Se for agente tentando acessar admin, manda para o painel de agente
+        header('Location: index.php');
+        exit;
+    }
+}
+
+// 5. Função de Verificação de Usuário (Qualquer um logado)
 function checkAuth() {
     if (!isset($_SESSION['user_id'])) {
         header('Location: login.php');
         exit;
     }
 }
+?>

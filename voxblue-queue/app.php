@@ -72,7 +72,7 @@ $view = $_GET['view'] ?? 'dashboard';
         <a href="../voxblue-queue/panel-queue/painel.php" class="nav-btn text-warning"><i class="bi bi-activity"></i> Monitor Realtime</a>
     </div>
     <div class="mt-auto pt-4 border-top border-secondary mx-3 mb-3">
-        <a href="logout.php" class="btn btn-outline-danger w-100 fw-bold btn-sm"><i class="bi bi-box-arrow-right me-2"></i> SAIR</a>
+        <a href="../" class="btn btn-outline-danger w-100 fw-bold btn-sm"><i class="bi bi-box-arrow-right me-2"></i> SAIR</a>
     </div>
 </div>
 
