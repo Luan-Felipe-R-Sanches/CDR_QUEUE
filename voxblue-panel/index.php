@@ -1,7 +1,10 @@
 <?php
 session_start();
-if (!isset($_SESSION['user_id'])) {
-    header("Location: login.php");
+
+// Verifica se o usuário logou no Portal da Raiz
+if (!isset($_SESSION['vox_user']) || empty($_SESSION['vox_user'])) {
+    // Se não logou, chuta para o login principal
+    header('Location: /login.php'); 
     exit;
 }
 ?>

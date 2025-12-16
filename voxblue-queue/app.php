@@ -1,6 +1,12 @@
 <?php
-// Arquivo: /var/www/html/relatorios/app.php
-require_once 'auth.php';
+session_start();
+
+// Verifica se o usuário logou no Portal da Raiz
+if (!isset($_SESSION['vox_user']) || empty($_SESSION['vox_user'])) {
+    // Se não logou, chuta para o login principal
+    header('Location: /login.php'); 
+    exit;
+}
 require_once 'config.php';
 
 $view = $_GET['view'] ?? 'dashboard';
