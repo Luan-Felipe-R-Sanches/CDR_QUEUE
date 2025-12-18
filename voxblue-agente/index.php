@@ -464,5 +464,6 @@ $meuNome = $_SESSION['user_realname'];
             return m + 'm ' + (sc < 10 ? '0' : '') + sc + 's';
         }
     </script>
+    <?php include_once 'softphone_widget.php'; ?>
 </body>
 </html>
